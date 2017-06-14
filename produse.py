@@ -1,3 +1,5 @@
+from collapse import collapse
+from merge import mergeRecord, trimRecord
 from trim import trim
 from multiprocessing import Process, Pipe
 from subprocess import Popen, PIPE
@@ -31,10 +33,37 @@ def __init__():
     sortIn, sortOut = Pipe(False)
     pysam.sort("-o", '<&' + sortOut.fileno(), '<&' + sortIn.fileno())
 
-    # Condense BWA output into BAM
-    condense(pysam.AlignmentFile(bwa.stdout), pysam.AlignmentFile(sortIn))
+    unsortedBAM = pysam.AlignmentFile(sortIn, "wb")
+    sortedBAM = pysam.AlignmentFile(sortOut, "rb")
 
-    
+    outputBAM = pysam.AlignmentFile(outputPath, "wb")
+
+    collapseProc = Process(target=collapse, args=(sortedBAM, outputBAM, threshold, mask))
+    collapseProc.start()
+
+    recordItr = pysam.AlignmentFile(bwa.stdout).fetch(until_eof=True)
+    while True:
+        firstRecord = recordItr.next()
+        secondRecord = recordItr.next()
+        # TODO exit loop condition
+        if firstRecord.query_name != secondRecord.query_name:
+            pass # TODO bwa was expected to output mate pairs
+
+        # Condense BWA output
+        condense(firstRecord)
+        condense(secondRecord)
+
+        forwardRecord = firstRecord if not firstRecord.is_reverse else secondRecord
+        reverseRecord = firstRecord if firstRecord.is_reverse else secondRecord
+
+        mergeRecord(reverseRecord, forwardRecord)
+        trimRecord(reverseRecord, forwardRecord.reference_end)
+
+        unsortedBAM.write(firstRecord)
+        unsortedBAM.write(secondRecord)
+
+
 
     p1.join()
     p2.join()
+    collapseProc.join()

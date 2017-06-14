@@ -3,6 +3,12 @@ import re
 
 MDOps = r'(\d*)\^?([A-Za-z])'
 
+def appendOrInc(ops: [], op: list):
+    if len(ops) > 0 and ops[-1][0] == op[0]:
+        ops[-1][1] += op[1]
+    else:
+        ops.append(op)
+
 class CigarIterator(object):
     def __init__(self, record: pysam.AlignedSegment):
         self.record = record
