@@ -27,7 +27,7 @@ class FamilyRecord:
             self.count += op.count
 
         def inSeq(self) -> bool:  # Returns true if the operation has a sequence coordinate
-            return self.op in [pysam.CMATCH, pysam.CINS, pysam.CSOFT_CLIP, pysam.CEQUAL, pysam.CDIFF]
+            return self.op in (pysam.CMATCH, pysam.CINS, pysam.CSOFT_CLIP, pysam.CEQUAL, pysam.CDIFF)
 
     __slots__ = 'name', 'pos', 'maxMapQ', 'cols'
     def __init__(self, name: str, pos: int):
@@ -106,4 +106,8 @@ class FamilyRecord:
         record.cigartuples = ops
         record.query_sequence = seq
         record.query_qualities = qual
+        # Added tags
+        # fQ:B:C Integer array containing Phred score of wrong base chosen during collapse
+        # fC:B:I Integer array containing pairs (simmilar to a CIGAR) of count and depth representing, from the start of the alignment, the depth of the family at a position
+        record.set_tags([('fQ', fQ), ('fC', fC)])
         return record

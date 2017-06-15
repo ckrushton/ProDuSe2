@@ -144,13 +144,13 @@ class CigarIterator(object):
 
 
     def inRef(self) -> bool: # Returns true if the passed operation has a reference coordinate
-        return self.getOp() in [pysam.CMATCH, pysam.CDEL, pysam.CREF_SKIP, pysam.CEQUAL, pysam.CDIFF]
+        return self.getOp() in (pysam.CMATCH, pysam.CDEL, pysam.CREF_SKIP, pysam.CEQUAL, pysam.CDIFF)
 
     def inSeq(self) -> bool: # Returns true if the passed operation has a sequence coordinate
-        return self.getOp() in [pysam.CMATCH, pysam.CINS, pysam.CSOFT_CLIP, pysam.CEQUAL, pysam.CDIFF]
+        return self.getOp() in (pysam.CMATCH, pysam.CINS, pysam.CSOFT_CLIP, pysam.CEQUAL, pysam.CDIFF)
 
     def clipped(self):
-        return self.getOp() in [pysam.CHARD_CLIP, pysam.CSOFT_CLIP]
+        return self.getOp() in (pysam.CHARD_CLIP, pysam.CSOFT_CLIP)
 
     def getRefBase(self) -> str:
         return (self.getSeqBase() if self.matchesRef() else self.md[self.mdI][0]) if self.inRef() else ""

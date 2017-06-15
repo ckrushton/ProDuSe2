@@ -4,9 +4,6 @@ import sortedcontainers
 import Levenshtein
 from FamilyRecord import FamilyRecord
 
-# Added tags
-# fQ:B:C Integer array containing Phred score of wrong base chosen during collapse
-# fC:B:I Integer array containing pairs (simmilar to a CIGAR) of count and depth representing, from the start of the alignment, the depth of the family at a position
 def collapse(inFile: pysam.AlignmentFile, outFile: pysam.AlignmentFile, threshold: int, mask: str):
     records = sortedcontainers.SortedListWithKey(key=lambda x: x.name)
     startPos = 0
@@ -44,4 +41,61 @@ def collapse(inFile: pysam.AlignmentFile, outFile: pysam.AlignmentFile, threshol
         else:
             familyRecord.aggregate(record)
 
+def getArgs(parser):
+    import configargparse
+    # Collapse arguments
+    collapseArgs = parser.add_argument_group("Collapse Arguments")
+
+    collapseArgs.add(
+        "-dp", "--duplex_position",
+        metavar="STR",
+        type=str,
+        required=True,
+        help="The positions in the adapter sequence to include in distance calculations between forward and reverse reads, 0 for no, 1 for yes"
+    )
+
+    # Used to maintain backwards compatibility with the poorly-named strand mis-match
+    adapterMismatch = collapseArgs.add_mutually_exclusive_group(required=True)
+    adapterMismatch.add(
+        "-amm", "--adapter_max_mismatch",
+        type=int,
+        help="The maximum number of mismatches allowed between the expected and actual adapter sequences",
+    )
+    adapterMismatch.add(
+        "--strand_max_mismatch",
+        type=int,
+        help=configargparse.SUPPRESS,
+    )
+
+    collapseArgs.add(
+        "-dmm", "--duplex_max_mismatch",
+        type=int,
+        required=True,
+        help="The maximum number of mismatches allowed between the expected and actual duplexed adapter sequences",
+    )
+
+    collapseArgs.add(
+        "-smm", "--sequence_max_mismatch",
+        type=int,
+        required=False,
+        default=20,
+        help="The maximum number of mismatches allowed in an alignment"
+    )
+
+    collapseArgs.add(
+        "-oo", "--original_output",
+        type=str,
+        required=False,
+        action="append",
+        default=None,
+        help="A pair of empty fastq files to rewrite original fastqs with duplex information"
+    )
+
+    collapseArgs.add(
+        "-sf", "--stats_file",
+        type=str,
+        required=False,
+        default=None,
+        help="An optional output file to list stats generated during collapse"
+    )
 
