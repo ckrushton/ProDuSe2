@@ -6,9 +6,6 @@ from FamilyRecord import FamilyRecord
 def filterBAM(inFile: pysam.AlignmentFile, outFile: pysam.AlignmentFile, args):
     pass
 
-def filter(familyRecord: FamilyRecord, args) -> bool:
-    pass
-
 def getArgs(parser):
 
     # SNV arguments

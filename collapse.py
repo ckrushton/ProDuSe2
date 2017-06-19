@@ -99,3 +99,5 @@ def getArgs(parser):
         help="An optional output file to list stats generated during collapse"
     )
 
+if __name__ == "__main__":
+    pass #TODO

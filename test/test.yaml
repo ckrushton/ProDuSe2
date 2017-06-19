@@ -1,0 +1,88 @@
+--- #Defaults
+&default
+snv:
+  min_molecules: 2
+  mutant_molecules: 3
+  variant_allele_fraction_threshold: 0.01
+  min_reads_per_uid: 1
+
+reference: /morinlab/reference/igenomes/Homo_sapiens/GSC/GRCh38/Sequence/WholeGenomeFasta/GRCh38_no_alt.fa
+bwa: bwa mem
+barcode_sequence: NNNWSMRWSYWKMWWT
+barcode_mask: "0001111111111110"
+
+max_family_distance: 3      # Maximum number of mismatches in masked region for be considered the same family
+max_barcode_distance: 3     # Maximum number of mismatches in masked region for before read is rejected
+
+filter:
+
+# Samples
+---
+<<: *default     # Inherit default parameters
+sample: CALM-0001
+fastqs:
+  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CALM-0001-1FD-1RD_S9_L001_R1_001.fastq.gz
+  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CALM-0001-1FD-1RD_S9_L001_R2_001.fastq.gz
+barcode_sequence: NNNSWKYWSRWMKWWT
+duplex_position: "0000000001111110"
+
+---
+<<: *default     # Inherit default parameters
+sample: CAKK-0003
+fastqs:
+  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAKK-0003-A5-E5_S8_L001_R1_001.fastq.gz
+  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAKK-0003-A5-E5_S8_L001_R2_001.fastq.gz
+barcode_sequence: NNNWSMRWSYRKMKWT
+duplex_position: "0000000001111110"
+
+---
+<<: *default     # Inherit default parameters
+sample: CAMP-0008
+fastqs:
+  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0008-3FB-4RB_S10_L001_R1_001.fastq.gz
+  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0008-3FB-4RB_S10_L001_R2_001.fastq.gz
+barcode_sequence: NNNSWMRSWYWMKWWT
+duplex_position: "0000000001111110"
+
+---
+<<: *default     # Inherit default parameters
+sample: CAMP-0010
+fastqs:
+  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0010-6c-5d-Ly17-CAMP-0006-6-5b_S11_L001_R1_001.fastq.gz
+  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0010-6c-5d-Ly17-CAMP-0006-6-5b_S11_L001_R2_001.fastq.gz
+barcode_sequence: NNNWSMRWSYWKMWWT
+duplex_position: "0000000001111110"
+
+---
+<<: *default     # Inherit default parameters
+sample: CAMP-0006
+fastqs:
+  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0010-6c-5d-Ly17-CAMP-0006-6-5b_S11_L001_R1_001.fastq.gz
+  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0010-6c-5d-Ly17-CAMP-0006-6-5b_S11_L001_R2_001.fastq.gz
+barcode_sequence: NNNWSMRWSYWKMWWT
+duplex_position: "0000000001111110"
+
+---
+<<: *default     # Inherit default parameters
+sample: CASA-0002
+fastqs:
+  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CASA-0002-6b-5e_S12_L001_R1_001.fastq.gz
+  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CASA-0002-6b-5e_S12_L001_R2_001.fastq.gz
+barcode_sequence: NNNWSMRWSYWKMWWT
+duplex_position: "0000000001111110"
+
+---
+<<: *default     # Inherit default parameters
+sample: 171FVTOP
+fastqs:
+  - /home/crushton/ProDuSeDev/2017-01-27-B3DB3/171FVTOP_S27_L001_R1_001.fastq.gz
+  - /home/crushton/ProDuSeDev/2017-01-27-B3DB3/171FVTOP_S27_L001_R2_001.fastq.gz
+barcode_sequence: NNNWSMRWSYWKMWWT
+
+---
+<<: *default     # Inherit default parameters
+sample: 358VCTOP
+fastqs:
+  - /home/crushton/ProDuSeDev/2017-01-27-B3DB3/358VCTOP_S31_L001_R1_001.fastq.gz
+  - /home/crushton/ProDuSeDev/2017-01-27-B3DB3/358VCTOP_S31_L001_R2_001.fastq.gz
+barcode_sequence: NNNSWMRSWYWMKWWT

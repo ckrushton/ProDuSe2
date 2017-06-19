@@ -79,3 +79,6 @@ def getArgs(parser):
         action="store_true",
         help="Instead, output entries without trimming the adapter sequence"
     )
+
+if __name__ == "__main__":
+    pass #TODO
