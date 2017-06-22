@@ -10,11 +10,31 @@ import BEDtoRef
 from sortedcontainers import SortedList
 import pysam
 import os
-from configutator import ValidateArgs, Assert
+from configutator import ConfigMap
+from valitator import Validate, Path, UnsignedInt, Type, PathOrNone
+from typing import TypeVar
 
-@ValidateArgs(os.path.isfile, os.path.isfile, os.path.isfile, Assert(lambda x: not x or os.path.isfile(x), FileNotFoundError("The bed file passed to {func.__name__} does not exist: {val}")), lambda x: x >= 0, lambda x: x >= 0, lambda x,args: len(x) == len(args["mask"]))
-def ProDuSe(fastq1, fastq2, reference, bed, output, bcThreshold, familyThreshold, sequence, mask, bwaArgs):
+BWA = TypeVar('BWA', str)#('BWA', list, lambda x: os.path.isfile(x[0]))
+
+@ConfigMap(fastq1='fastqs[0]', fastq2='fastqs[1]')
+@Validate
+def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, bed: PathOrNone, output: Path, bcThreshold, familyThreshold, sequence, mask, bwaArgs: BWA):
+    """
+
+    :param fastq1: Path to the first fastq
+    :param fastq2: Path to the second fastq
+    :param reference: Path to the reference fasta
+    :param bed: Path to a bed file containing regions to restrict reads to (optional)
+    :param output:
+    :param bcThreshold:
+    :param familyThreshold:
+    :param sequence:
+    :param mask:
+    :param bwaArgs:
+    :return:
+    """
     # Just a heads up, the following code seems out of order. You have to follow the pipes to make sense of it. Good luck Mario ;)
+
 
     # Load up bed file coordinates relative to reference index
     if bed:
@@ -56,7 +76,10 @@ def ProDuSe(fastq1, fastq2, reference, bed, output, bcThreshold, familyThreshold
         # TODO exit loop condition
         if firstRecord.query_name != secondRecord.query_name:
             pass # TODO bwa was expected to output mate pairs
-        if bed and not BEDtoRef.inCoords(firstRecord.reference_start, coords) or not BEDtoRef.inCoords(firstRecord.reference_start, coords):
+        if bed and not BEDtoRef.inCoords(firstRecord.reference_start, coords)   \
+                or not BEDtoRef.inCoords(firstRecord.reference_end, coords)     \
+                or not BEDtoRef.inCoords(secondRecord.reference_start, coords)  \
+                or not BEDtoRef.inCoords(secondRecord.reference_end, coords):
             continue
 
         # Condense BWA output
@@ -104,17 +127,4 @@ def rangeCmp(a, b):
 
     return result
 
-def getArgs(parser):
-    # Universal Args
-    pass
-
 if __name__ == "__main__":
-    # Look, we both know this is terrible. But resolve_conflicts is also terrible. Thus, I don't have any choice but to copy-paste arguments over
-
-    bwaArgs = ['bwa', 'mem', '-C', reference]
-
-
-    getArgs(parser)
-    trim.getArgs(parser)
-    collapse.getArgs(parser)
-    filter.getArgs(parser)

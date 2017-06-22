@@ -39,24 +39,7 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
     if refEnd > rEnd:
         refEnd = rEnd
 
-    toItr.skipToRefPos(refStart)
-    fromItr.skipToRefPos(refStart)
-
-    toCost = 0
-    fromCost = 0
-
-    while True:
-        toCost += costs[toItr.getOp()](toItr.opEnd() - toItr.opStart + 1)
-        if not toItr.nextOp() or toItr.clipped(): break
-    
-    while True:
-        fromCost += costs[fromItr.getOp()](fromItr.opEnd() - fromItr.opStart + 1)
-        if not fromItr.nextOp() or fromItr.clipped(): break
-
-    toOptimal = toCost > fromCost
-
-    toItr.rewind()
-    fromItr.rewind()
+    toOptimal = None
 
     while toItr.refPos <= refEnd or fromItr.refPos <= refEnd:
         if toItr.getOp() == fromItr.getOp():
@@ -68,6 +51,24 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
                     seq += fromItr.getSeqBase()
                     qual += [fromItr.getBaseQual()]
             appendOrInc(ops, [toItr.getOp(), 1])
+            continue
+        if toOptimal == None:
+            # Dont calculate costs if unnecessary 
+            toCost = 0
+            fromCost = 0
+            tItr = CigarIterator(toRecord)
+            fItr = CigarIterator(fromRecord)
+            tItr.skipToRefPos(refStart)
+            fItr.skipToRefPos(refStart)
+            while True:
+                toCost += costs[tItr.getOp()](tItr.opEnd() - tItr.opStart + 1)
+                if not tItr.nextOp() or tItr.clipped(): break
+
+            while True:
+                fromCost += costs[fItr.getOp()](fItr.opEnd() - fItr.opStart + 1)
+                if not fItr.nextOp() or fItr.clipped(): break
+
+            toOptimal = toCost > fromCost
         elif toOptimal:
             if toItr.inSeq():
                 seq += toItr.getSeqBase()

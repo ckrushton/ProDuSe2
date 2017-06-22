@@ -48,37 +48,5 @@ def trim(inStream: io.IOBase, outStream: io.IOBase, threshold: int, sequence: st
         record.write(outStream)
     return discard, count
 
-def getArgs(parser):
-    #import configargparse
-    trimArgs = parser.add_argument_group("Trim Arguments")
-    trimArgs.add(
-        "--adapter_sequence",
-        type=str,
-        required=True,
-        help="The randomized adapter sequence flanked in input fastq files described using IUPAC bases"
-    )
-    trimArgs.add(
-        "--adapter_mask",
-        type=str,
-        required=True,
-        help="The positions in the adapter sequence to include in distance calculations, 0 for no, 1 for yes"
-    )
-    trimArgs.add(
-        "--max_mismatch",
-        type=int,
-        required=True,
-        help="The maximum number of mismatches allowed between the expected and actual adapter sequences",
-    )
-    trimArgs.add(
-        "-v",
-        action="store_true",
-        help="Instead, output entries that are distant from the adapter sequence"
-    )
-    trimArgs.add(
-        "-u",
-        action="store_true",
-        help="Instead, output entries without trimming the adapter sequence"
-    )
-
 if __name__ == "__main__":
     pass #TODO

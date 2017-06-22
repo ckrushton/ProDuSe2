@@ -26,6 +26,5 @@ def condense(record: pysam.AlignedSegment):
     record.query_qualities = qual
     record.cigartuples = ops
 
-
 if __name__ == "__main__":
     pass #TODO
