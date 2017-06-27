@@ -1,62 +1,118 @@
-import collapse
+#!/usr/bin/env python3
+import os
+
+from collapse import collapse
 from merge import mergeRecord, trimRecord
 from trim import trim
-import trim
-import filter
 from multiprocessing import Process, Pipe
 from subprocess import Popen, PIPE
 from condense import condense
+
 import BEDtoRef
 from sortedcontainers import SortedList
 import pysam
-import os
-from configutator import ValidateArgs, Assert
+import gzip
+import sys
+import tempfile
+import shutil
+from configutator import ConfigMap, handleArgs
 
-@ValidateArgs(os.path.isfile, os.path.isfile, os.path.isfile, Assert(lambda x: not x or os.path.isfile(x), FileNotFoundError("The bed file passed to {func.__name__} does not exist: {val}")), lambda x: x >= 0, lambda x: x >= 0, lambda x,args: len(x) == len(args["mask"]))
-def ProDuSe(fastq1, fastq2, reference, bed, output, bcThreshold, familyThreshold, sequence, mask, bwaArgs):
+from valitator import Path, UnsignedInt, PathOrNone, Executable
+
+@ConfigMap(fastq1='fastqs[0]', fastq2='fastqs[1]', bwaArgs='bwa')
+def ProDuSe(fastq1: Path, fastq2: Path, reference: str, bed: PathOrNone, output: str, bwaArgs: Executable):
+    """
+
+    :param fastq1: Path to the first fastq
+    :param fastq2: Path to the second fastq
+    :param reference: Path to the reference fasta
+    :param bed: Path to a bed file containing regions to restrict reads to (optional)
+    :param output:
+    :param bcThreshold:
+    :param familyThreshold:
+    :param sequence:
+    :param mask:
+    :param bwaArgs:
+    :return:
+    """
     # Just a heads up, the following code seems out of order. You have to follow the pipes to make sense of it. Good luck Mario ;)
+    global config
+    temp_dir = tempfile.mkdtemp()
 
     # Load up bed file coordinates relative to reference index
     if bed:
         coords = BEDtoRef.BEDtoRef(pysam.TabixFile(bed), pysam.TabixFile(reference + ".fai"))
+        sys.stderr.write("BED regions loaded.\n")
     else:
-        coords = SortedList()
+        coords = None
 
-    trimIn1, trimOut1 = Pipe(False)
-    trimIn2, trimOut2 = Pipe(False)
+    trimOut1Path = os.path.join(temp_dir, 'trimOut1')
+    os.mkfifo(trimOut1Path)
+    trimOut2Path = os.path.join(temp_dir, 'trimOut2')
+    os.mkfifo(trimOut2Path)
+    sortInPath = os.path.join(temp_dir, 'sortIn')
+    sortOutPath = os.path.join(temp_dir, 'sortOut')
+    os.mkfifo(sortInPath)
+    os.mkfifo(sortOutPath)
+    bwaOutPath = os.path.join(temp_dir, 'bwaOut')
+    os.mkfifo(bwaOutPath)
 
-    # Start trim subprocesses
-    p1Result = []
-    p1 = Process(target=callRes, args=(trim, (open(fastq1), open(trimOut1, 'w'), bcThreshold, sequence), p1Result))
-    p1.start()
-    p2Result = []
-    p2 = Process(target=callRes, args=(trim, (open(fastq2), open(trimOut2, 'w'), bcThreshold, sequence), p2Result))
-    p2.start()
+    # Start sort by coord
+    sys.stderr.write("Starting sort subprocess..\n")
+    sortp = Process(target=pysam.sort, args=("-o", sortOutPath, sortInPath))
+    sortp.start()
+
+    #Start clipping and filtering the bwa output
+    sys.stderr.write("Starting clipping and read filter subprocess..\n")
+    cfp = Process(target=clipAndFilter, args=(bwaOutPath, sortInPath, coords))
+    cfp.start()
 
     # Start bwa subprocess
-    bwaArgs += ['<&' + str(trimIn1.fileno()), '<&' + str(trimIn2.fileno())]
-    bwa = Popen(bwaArgs, stdout=PIPE, pass_fds=(trimIn1.fileno(), trimIn2.fileno()))
+    if isinstance(bwaArgs, str):
+        bwaArgs = bwaArgs.split(' ')
+    sys.stderr.write("Starting BWA subprocess..\n")
+    bwaArgs += ['-C', reference, trimOut1Path, trimOut2Path]
+    bwa = Popen(bwaArgs, stdout=open(bwaOutPath, 'w'))
 
-    #Start sort by coord
-    sortIn, sortOut = Pipe(False)
-    pysam.sort("-o", '<&' + sortOut.fileno(), '<&' + sortIn.fileno())
+    # Start trim subprocesses
+    sys.stderr.write("Starting trim subprocesses..\n")
+    p1Result = []
+    p1 = Process(target=callRes, args=(trim, dict(inStream=gzip.open(fastq1), outStream=open(trimOut1Path, 'w'), **config[trim]), p1Result))
+    p1.start()
+    p2Result = []
+    p2 = Process(target=callRes, args=(trim, dict(inStream=gzip.open(fastq2), outStream=open(trimOut2Path, 'w'), **config[trim]), p2Result))
+    p2.start()
 
-    unsortedBAM = pysam.AlignmentFile(sortIn, "wb")
-    sortedBAM = pysam.AlignmentFile(sortOut, "rb")
-
-    outputBAM = pysam.AlignmentFile(output, "wb")
-
-    collapseProc = Process(target=collapse.collapse, args=(sortedBAM, outputBAM, familyThreshold, mask))
+    sortedBAM = pysam.AlignmentFile(sortOutPath, "r")
+    outputBAM = pysam.AlignmentFile(output, "wb", template=sortedBAM)
+    sys.stderr.write("Starting collapse subprocess..\n")
+    collapseProc = Process(target=collapse, kwargs=dict(inFile=sortedBAM, outFile=outputBAM, **config[collapse]))
     collapseProc.start()
 
-    recordItr = pysam.AlignmentFile(bwa.stdout).fetch(until_eof=True)
+    p1.join()
+    p2.join()
+    sortp.join()
+    cfp.join()
+    collapseProc.join()
+    bwa.wait()
+    shutil.rmtree(temp_dir)
+
+def clipAndFilter(inPath, outPath, regions = None):
+    #a = open(inPath, 'r')
+    #inPath = '/home/ncm3/bwaout.sam'
+    inFile = pysam.AlignmentFile(inPath, 'r', check_sq=False) #TODO: change back to inPath
+    outFile = pysam.AlignmentFile(outPath, "w", template=inFile)
+    #recordItr = inFile.fetch(until_eof=True)
     while True:
-        firstRecord = recordItr.next()
-        secondRecord = recordItr.next()
+        firstRecord = next(inFile)
+        secondRecord = next(inFile)
         # TODO exit loop condition
         if firstRecord.query_name != secondRecord.query_name:
-            pass # TODO bwa was expected to output mate pairs
-        if bed and not BEDtoRef.inCoords(firstRecord.reference_start, coords) or not BEDtoRef.inCoords(firstRecord.reference_start, coords):
+            pass  # TODO bwa was expected to output mate pairs
+        if regions and (not BEDtoRef.inCoords(firstRecord.reference_start, regions) \
+                or not BEDtoRef.inCoords(firstRecord.reference_end, regions) \
+                or not BEDtoRef.inCoords(secondRecord.reference_start, regions) \
+                or not BEDtoRef.inCoords(secondRecord.reference_end, regions)):
             continue
 
         # Condense BWA output
@@ -69,16 +125,12 @@ def ProDuSe(fastq1, fastq2, reference, bed, output, bcThreshold, familyThreshold
         mergeRecord(reverseRecord, forwardRecord)
         trimRecord(reverseRecord, forwardRecord.reference_end)
 
-        unsortedBAM.write(firstRecord)
-        unsortedBAM.write(secondRecord)
+        outFile.write(firstRecord)
+        outFile.write(secondRecord)
 
-    p1.join()
-    p2.join()
-    collapseProc.join()
-
-def callRes(func, args, res):
+def callRes(func, args, res: list):
     "Process helper to retrieve return value of function"
-    res = func(**args)
+    res.append(func(**args))
 
 chrList = []
 def rangeCmp(a, b):
@@ -104,17 +156,11 @@ def rangeCmp(a, b):
 
     return result
 
-def getArgs(parser):
-    # Universal Args
-    pass
-
 if __name__ == "__main__":
-    # Look, we both know this is terrible. But resolve_conflicts is also terrible. Thus, I don't have any choice but to copy-paste arguments over
-
-    bwaArgs = ['bwa', 'mem', '-C', reference]
-
-
-    getArgs(parser)
-    trim.getArgs(parser)
-    collapse.getArgs(parser)
-    filter.getArgs(parser)
+    ConfigMap(_func='trim')(trim)
+    ConfigMap(_func='collapse')(collapse)
+    for argmap in handleArgs(sys.argv, (ProDuSe, trim, collapse)):
+        global config
+        config = argmap
+        ProDuSe(**argmap[ProDuSe])
+        break

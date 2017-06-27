@@ -1,5 +1,6 @@
 import io
 import FastqRecord
+from configutator import ConfigMap
 
 IUPACCodeDict = {
     'A' : ['A'],    #Adenine
@@ -25,60 +26,29 @@ IUPACCodeDict = {
 def IUPACMatch(code1: str, code2: str) -> bool:
     return code2 in IUPACCodeDict[code1]
 
-def trim(inStream: io.IOBase, outStream: io.IOBase, threshold: int, sequence: str, reverse: bool = False) -> (int, int):
+@ConfigMap(inStream=None, outStream=None)
+def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barcode_sequence: str, reverse: bool = False) -> (int, int):
     record = FastqRecord.FastqRecord()
     invert = False
     count = 0
     discard = 0
-    if threshold < 0:
+    if barcode_distance < 0:
         invert = True
-        threshold *= -1
+        barcode_distance *= -1
     while record.read(inStream):
         mismatch = 0
         count += 1
         # Store barcode in sequence description
-        record.desc1 += ' BC:Z:' + record.seq[-len(sequence):] if reverse else record.seq[:len(sequence)]
-        for i in range(0, len(sequence), 1):
-            mismatch += IUPACMatch(sequence[i], record.seq[-i if reverse else i])
-        if invert != mismatch > threshold: #XOR
+        record.desc1 += '\tBC:Z:' + (record.seq[-len(barcode_sequence):] if reverse else record.seq[:len(barcode_sequence)])
+        for i in range(0, len(barcode_sequence), 1):
+            mismatch += not IUPACMatch(barcode_sequence[i], record.seq[-i if reverse else i])
+        if invert != mismatch > barcode_distance: #XOR
             discard += 1
             # Keep empty record to make BWA happy about having read mate
             record.seq = ''
             record.qual = ''
         record.write(outStream)
     return discard, count
-
-def getArgs(parser):
-    #import configargparse
-    trimArgs = parser.add_argument_group("Trim Arguments")
-    trimArgs.add(
-        "--adapter_sequence",
-        type=str,
-        required=True,
-        help="The randomized adapter sequence flanked in input fastq files described using IUPAC bases"
-    )
-    trimArgs.add(
-        "--adapter_mask",
-        type=str,
-        required=True,
-        help="The positions in the adapter sequence to include in distance calculations, 0 for no, 1 for yes"
-    )
-    trimArgs.add(
-        "--max_mismatch",
-        type=int,
-        required=True,
-        help="The maximum number of mismatches allowed between the expected and actual adapter sequences",
-    )
-    trimArgs.add(
-        "-v",
-        action="store_true",
-        help="Instead, output entries that are distant from the adapter sequence"
-    )
-    trimArgs.add(
-        "-u",
-        action="store_true",
-        help="Instead, output entries without trimming the adapter sequence"
-    )
 
 if __name__ == "__main__":
     pass #TODO

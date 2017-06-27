@@ -25,6 +25,9 @@ def trimRecord(record: pysam.AlignedSegment, start: int = 0, end: int = maxsize)
     record.cigartuples = ops
 
 def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment, refStart: int = -1, refEnd: int = maxsize, costs = default_cost) -> list:
+    if fromRecord.query_alignment_length == 0 or toRecord.query_alignment_length == 0:
+        #No work needs to be done
+        return
     stats = []
     seq = ""
     qual = []
@@ -32,31 +35,14 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
     toItr = CigarIterator(toRecord)
     fromItr = CigarIterator(fromRecord)
 
-    rStart = fromRecord.reference_start if fromRecord.reference_start < toRecord.referece_start else toRecord.reference_start
-    rEnd = (fromRecord.reference_end if fromRecord.reference_end < toRecord.referece_end else toRecord.reference_end) - 1
+    rStart = fromRecord.reference_start if fromRecord.reference_start < toRecord.reference_start else toRecord.reference_start
+    rEnd = (fromRecord.reference_end if fromRecord.reference_end < toRecord.reference_end else toRecord.reference_end) - 1
     if refStart < rStart:
         refStart = rStart
     if refEnd > rEnd:
         refEnd = rEnd
 
-    toItr.skipToRefPos(refStart)
-    fromItr.skipToRefPos(refStart)
-
-    toCost = 0
-    fromCost = 0
-
-    while True:
-        toCost += costs[toItr.getOp()](toItr.opEnd() - toItr.opStart + 1)
-        if not toItr.nextOp() or toItr.clipped(): break
-    
-    while True:
-        fromCost += costs[fromItr.getOp()](fromItr.opEnd() - fromItr.opStart + 1)
-        if not fromItr.nextOp() or fromItr.clipped(): break
-
-    toOptimal = toCost > fromCost
-
-    toItr.rewind()
-    fromItr.rewind()
+    toOptimal = None
 
     while toItr.refPos <= refEnd or fromItr.refPos <= refEnd:
         if toItr.getOp() == fromItr.getOp():
@@ -68,6 +54,24 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
                     seq += fromItr.getSeqBase()
                     qual += [fromItr.getBaseQual()]
             appendOrInc(ops, [toItr.getOp(), 1])
+            continue
+        if toOptimal == None:
+            # Dont calculate costs if unnecessary 
+            toCost = 0
+            fromCost = 0
+            tItr = CigarIterator(toRecord)
+            fItr = CigarIterator(fromRecord)
+            tItr.skipToRefPos(refStart)
+            fItr.skipToRefPos(refStart)
+            while not tItr.clipped():
+                toCost += costs[tItr.getOp()](tItr.opEnd() - tItr.opStart + 1)
+                if not tItr.nextOp(): break
+
+            while not fItr.clipped():
+                fromCost += costs[fItr.getOp()](fItr.opEnd() - fItr.opStart + 1)
+                if not fItr.nextOp(): break
+
+            toOptimal = toCost > fromCost
         elif toOptimal:
             if toItr.inSeq():
                 seq += toItr.getSeqBase()

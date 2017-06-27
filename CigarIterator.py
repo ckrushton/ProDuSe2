@@ -12,8 +12,9 @@ def appendOrInc(ops: [], op: list):
 class CigarIterator(object):
     def __init__(self, record: pysam.AlignedSegment):
         self.record = record
-        self.ops = record.cigartuples  # List of CIGAR operations
+        self.ops = record.cigartuples or []  # List of CIGAR operations
         self.md = []  # Reference bases from MD tag
+        self.rewind()
         self._buildMD()
 
     def rewind(self):

@@ -6,23 +6,30 @@ class FastqRecord(object):
     # Name Description1 Sequence Description2 Quality
     name, desc1, seq, desc2, qual = "","","","",""
     
-    def read(self, stream:io.IOBase) -> bool:
-        line1 = stream.readline()
+    def read(self, stream:io.IOBase, SAMify:bool = True) -> bool:
+        line1 = stream.readline().decode('ascii')
         if line1 is None: return False
-        line2 = stream.readline()
+        line2 = stream.readline().decode('ascii')
         if line2 is None: return False
-        line3 = stream.readline()
+        line3 = stream.readline().decode('ascii')
         if line3 is None: return False
-        line4 = stream.readline()
+        line4 = stream.readline().decode('ascii')
         if line4 is None: return False
 
         # Generate index for record data
-        nameEnd = self.line1.find(' ')-1
+        nameEnd = line1.find(' ')
         self.name = line1[1:nameEnd]
-        self.desc1 = line1[nameEnd+2:-1]
+        self.desc1 = line1[nameEnd+1:-1]
         self.seq = line2[:-1]
-        self.desc2 = line3[self.line3.find(' ')+1:-1]
+        nameEnd = line3.find(' ')
+        self.desc2 = line3[nameEnd+1:-1] if nameEnd > 0 else ""
         self.qual = line4[:-1]
+
+        if SAMify:
+            if self.desc1:
+                self.desc1 = "CO:Z:" + self.desc1
+            if self.desc2:
+                self.desc1 = "CO:Z:" + self.desc2
         return True
     
     def clip(self, start: int, stop: int):

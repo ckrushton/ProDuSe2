@@ -3,6 +3,9 @@ from CigarIterator import CigarIterator, appendOrInc
 
 def condense(record: pysam.AlignedSegment):
 
+    if record.query_alignment_length == 0:
+        # No work needs to be done
+        return
     seq = ""
     qual = []
     ops = []
@@ -25,7 +28,6 @@ def condense(record: pysam.AlignedSegment):
     record.query_sequence = seq
     record.query_qualities = qual
     record.cigartuples = ops
-
 
 if __name__ == "__main__":
     pass #TODO
