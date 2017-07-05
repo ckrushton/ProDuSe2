@@ -2,7 +2,8 @@
 import os
 
 from collapse import collapse
-from merge import mergeRecord, trimRecord
+from clean import clean
+
 from trim import trim
 from multiprocessing import Process, Pipe
 from subprocess import Popen, PIPE
@@ -38,7 +39,7 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: str, bed: PathOrNone, output:
     # Just a heads up, the following code seems out of order. You have to follow the pipes to make sense of it. Good luck Mario ;)
     global config
     temp_dir = tempfile.mkdtemp()
-
+    sys.stderr.write("Pipes created in {}\n".format(temp_dir))
     # Load up bed file coordinates relative to reference index
     if bed:
         coords = BEDtoRef.BEDtoRef(pysam.TabixFile(bed), pysam.TabixFile(reference + ".fai"))
@@ -64,7 +65,7 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: str, bed: PathOrNone, output:
 
     #Start clipping and filtering the bwa output
     sys.stderr.write("Starting clipping and read filter subprocess..\n")
-    cfp = Process(target=clipAndFilter, args=(bwaOutPath, sortInPath, coords))
+    cfp = Process(target=clean, args=(bwaOutPath, sortInPath, coords))
     cfp.start()
 
     # Start bwa subprocess
@@ -96,37 +97,6 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: str, bed: PathOrNone, output:
     collapseProc.join()
     bwa.wait()
     shutil.rmtree(temp_dir)
-
-def clipAndFilter(inPath, outPath, regions = None):
-    #a = open(inPath, 'r')
-    #inPath = '/home/ncm3/bwaout.sam'
-    inFile = pysam.AlignmentFile(inPath, 'r', check_sq=False) #TODO: change back to inPath
-    outFile = pysam.AlignmentFile(outPath, "w", template=inFile)
-    #recordItr = inFile.fetch(until_eof=True)
-    while True:
-        firstRecord = next(inFile)
-        secondRecord = next(inFile)
-        # TODO exit loop condition
-        if firstRecord.query_name != secondRecord.query_name:
-            pass  # TODO bwa was expected to output mate pairs
-        if regions and (not BEDtoRef.inCoords(firstRecord.reference_start, regions) \
-                or not BEDtoRef.inCoords(firstRecord.reference_end, regions) \
-                or not BEDtoRef.inCoords(secondRecord.reference_start, regions) \
-                or not BEDtoRef.inCoords(secondRecord.reference_end, regions)):
-            continue
-
-        # Condense BWA output
-        condense(firstRecord)
-        condense(secondRecord)
-
-        forwardRecord = firstRecord if not firstRecord.is_reverse else secondRecord
-        reverseRecord = firstRecord if firstRecord.is_reverse else secondRecord
-
-        mergeRecord(reverseRecord, forwardRecord)
-        trimRecord(reverseRecord, forwardRecord.reference_end)
-
-        outFile.write(firstRecord)
-        outFile.write(secondRecord)
 
 def callRes(func, args, res: list):
     "Process helper to retrieve return value of function"

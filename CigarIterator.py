@@ -3,19 +3,20 @@ import re
 
 MDOps = r'(\d*)\^?([A-Za-z])'
 
-def appendOrInc(ops: [], op: list):
+def appendOrInc(ops: list, op: list):
+    if op[1] <= 0:
+        return
     if len(ops) > 0 and ops[-1][0] == op[0]:
         ops[-1][1] += op[1]
     else:
-        ops.append(op)
+        ops.append(list(op))
 
 class CigarIterator(object):
     def __init__(self, record: pysam.AlignedSegment):
         self.record = record
         self.ops = record.cigartuples or []  # List of CIGAR operations
-        self.md = []  # Reference bases from MD tag
+        self.md = None  # Reference bases from MD tag
         self.rewind()
-        self._buildMD()
 
     def rewind(self):
         self.opsI = 0  # Current index in ops
@@ -31,153 +32,224 @@ class CigarIterator(object):
         return self
 
     def __next__(self):
-        self.opPos += 1
-        if self.opEnd() <= self.opPos:
-            self.opStart += self.opLength()
-            self.opsI += 1
-        if self.opsI >= len(self.ops):
+        if self.next():
+            return self
+        else:
             raise StopIteration
-        while self._getMD() and self._getMD()[1] < self.opPos:
-            self.mdI += 1
-        if self.inSeq():
-            self.seqPos += 1
-        if self.inRef():
-            self.refPos += 1
+
+    @property
+    def valid(self):
+        return self.opsI < len(self.ops)
+
+    def step(self, i: int):
+        #TODO support negative step
+        if i < 0: raise NotImplementedError("Negative stepping not yet supported.")
+        if self.opPos < 0:
+            self.opPos = 0
+        self.opPos += i
+        if not self.valid:
+            return False
+        while self.opEnd < self.opPos:
+            delta = self.opEnd - self.opPos + 1
+            i -= delta
+            if self.inSeq:
+                self.seqPos += delta
+            if self.inRef:
+                self.refPos += delta
+            self.opStart += self.opLength
+            self.opsI += 1
+            if not self.valid:
+                return False
+        if self.inSeq:
+            self.seqPos += i
+        if self.inRef:
+            self.refPos += i
+
+        return True
 
     def next(self) -> bool:
-        try:
-            self.__next__()
-            return True
-        except StopIteration:
-            return False
+        if self.opPos < 0:
+            self.opPos = 0
+            return self.valid
+        return self.step(1)
+
+    #def prev(self) -> bool:
+    #    return self.step(-1)
 
     def nextOp(self) -> bool:
-        self.opsI += 1
-        if self.opsI >= len(self.ops):
+        if self.opPos < 0:
+            self.opPos = 0
+            return self.valid
+        if not self.valid or not len(self.ops):
             return False
-        dist = self.opEnd() - self.opPos
-        self.opStart += self.opLength()
+        dist = self.ops[self.opsI][1] - (self.opPos - self.opStart)
+        self.opStart += self.opLength
         self.opPos = self.opStart
-        while self._getMD() and self._getMD()[1] < self.opPos:
-            self.mdI += 1
-        if self.inSeq():
+        if self.inSeq:
             self.seqPos += dist
-        if self.inRef():
+        if self.inRef:
             self.refPos += dist
-        return True
+        self.opsI += 1
+        return self.valid
 
     def _buildMD(self):
         if self.record.has_tag("MD"):
+            self.md = []
             mdStr = self.record.get_tag("MD")
+            i = 0
+            pos = 0
             mdOffset = self.record.query_alignment_start # Cigar pos will correlate to number of clipped bases
             for mdOp in re.finditer(MDOps, mdStr):
                 matchCount, refBase = mdOp.group(1, 2)
-                if matchCount != "":
-                    mdOffset += int(matchCount)
+                mdOffset += int(matchCount or 0)
+                while pos <= mdOffset: # Scan CIGAR for insertions and add to offset as MD does not include insertions in MD coordinate space
+                    pos += self.ops[i][1]
+                    if self.ops[i][0] == pysam.CINS:
+                        mdOffset += self.ops[i][1]
+                    i += 1
                 self.md.append((refBase, mdOffset))
                 mdOffset += 1
 
     def _getMD(self) -> tuple:
-        return self.md[self.mdI] if self.mdI >= 0 and self.mdI < len(self.md) else None
+        if self.md == None:
+            self._buildMD()
+        if self.md == None or self.mdI >= len(self.md):
+            return (None, None)
+        while self.md[self.mdI][1] < self.opPos:
+            self.mdI += 1
+            if self.mdI >= len(self.md):
+                return (None, None)
+        return self.md[self.mdI]
 
-    def _getOpMD(self):
-        md = self._getMD()
-        return md if md and md[1] == self.opPos else None
-
+    @property
     def opLength(self) -> int:
         return self.ops[self.opsI][1] if len(self.ops) else 0
 
+    @property
     def opEnd(self) -> int:
-        l = self.opLength()
+        l = self.opLength
         if l == 0:
             return self.opStart
         else:
             return self.opStart + l - 1
 
-    def skipClipped(self) -> int:
+    def skipClipped(self, hardOnly: bool = False) -> int:
         count = 0
-        if self.opLength() > 0:
-            while self.opsI < len(self.ops) and self.clipped():
-                count += self.opLength()
+        if self.opLength > 0:
+            while self.opsI < len(self.ops) and (self.op == pysam.CHARD_CLIP if hardOnly else self.clipped):
+                count += self.opLength
                 self.opsI += 1
             self.opStart = count
             self.opPos = self.opStart
 
         return count
 
-    def skipToRefPos(self, pos: int):
-        pass #TODO
-
-    def skipToNonRef(self) -> bool: # Move iterator to next non-reference cigar position (variant in MD tag)
-        if len(self.md) == 0:
-            return False
-        if self.md[self.mdI][1] == self.opPos:
-            self.mdI += 1
-        if self.mdI >= len(self.md) or self.opsI >= len(self.ops):
-            return False
-        newPos = self.md[self.mdI][1]
+    def skipToPos(self, pos: int): # Pos is in cigar space
         if self.opPos < 0:
             self.opPos = 0
-        dist = newPos - self.opPos
+        dist = pos - self.opPos
 
         while dist > 0:
-            if newPos < self.opEnd():
-                if self.inSeq():
+            if pos < self.opEnd:
+                if self.inSeq:
                     self.seqPos += dist
-                if self.inRef():
+                if self.inRef:
                     self.refPos += dist
                 dist = 0
-                self.opPos = newPos
+                self.opPos = pos
             else:
-                d = self.opEnd() - self.opPos
+                d = self.opEnd - self.opPos
                 dist -= d
-                if self.inSeq():
+                if self.inSeq:
                     self.seqPos += d
-                if self.inRef():
+                if self.inRef:
                     self.refPos += d
-                self.opStart += self.opLength()
+                self.opStart += self.opLength
                 self.opPos = self.opStart
                 self.opsI += 1
                 if self.opsI >= len(self.ops):
                     return False
         return True
 
+    def skipToRefPos(self, pos): # Pos is in reference space
+        if self.opPos < 0:
+            self.opPos = 0
+        dist = pos - self.refPos
+        while dist > 0:
+            if self.inRef:
+                if dist + self.opPos <= self.opEnd +1:
+                    if self.inSeq:
+                        self.seqPos += dist
+                    self.refPos += dist
+                    self.opPos += dist
+                    dist = 0
+                else:
+                    dist -= self.opEnd - self.opPos
+                    if not self.nextOp(): return False
+            else:
+                if not self.nextOp(): return False
+        return True
 
 
+    def skipToNonRef(self) -> bool: # Move iterator to next non-reference cigar position (variant in MD tag)
+        md = self._getMD()
+        if md[0] is None:
+            return False
+        if md[1] == self.opPos:
+            self.mdI += 1
+        md = self._getMD()
+        if md[0] is None or not self.valid:
+            return False
+        return self.skipToRefPos(md[1])
+
+    @property
     def inRef(self) -> bool: # Returns true if the passed operation has a reference coordinate
-        return self.getOp() in (pysam.CMATCH, pysam.CDEL, pysam.CREF_SKIP, pysam.CEQUAL, pysam.CDIFF)
+        return self.op in (pysam.CMATCH, pysam.CDEL, pysam.CREF_SKIP, pysam.CEQUAL, pysam.CDIFF)
 
+    @property
     def inSeq(self) -> bool: # Returns true if the passed operation has a sequence coordinate
-        return self.getOp() in (pysam.CMATCH, pysam.CINS, pysam.CSOFT_CLIP, pysam.CEQUAL, pysam.CDIFF)
+        return self.op in (pysam.CMATCH, pysam.CINS, pysam.CSOFT_CLIP, pysam.CEQUAL, pysam.CDIFF)
 
+    @property
     def clipped(self):
-        return self.getOp() in (pysam.CHARD_CLIP, pysam.CSOFT_CLIP)
+        return self.op in (pysam.CHARD_CLIP, pysam.CSOFT_CLIP)
 
-    def getRefBase(self) -> str:
-        return (self.getSeqBase() if self.matchesRef() else self.md[self.mdI][0]) if self.inRef() else ""
+    @property
+    def refBase(self) -> str:
+        return (self.seqBase if self.matchesRef else self._getMD()[0]) if self.inRef else ""
 
+    @property
     def matchesRef(self) -> bool:
-        return len(self.md) == 0 or self.md[self.mdI][1] != self.opPos #self.getSeqBase() == self.getRefBase()
+        return self._getMD()[1] != self.opPos #self.getSeqBase() == self.getRefBase()
 
-    def getSeqBase(self) -> str:
-        return self.record.query_alignment_sequence[self.seqPos] if self.inSeq() else ""
+    @property
+    def seqBase(self) -> str:
+        return self.record.query_sequence[self.seqPos] if self.inSeq else ""
 
+    @seqBase.setter
     def setSeqBase(self, str) -> bool:
-        if self.inSeq():
-            self.record.query_alignment_sequence[self.seqPos] = str
+        if self.inSeq:
+            self.record.query_sequence[self.seqPos] = str
         else:
             return False
         return True
 
-    def getBaseQual(self) -> int:
-        return self.record.query_alignment_qualities[self.seqPos] if self.inSeq() else None
+    @property
+    def baseQual(self) -> int:
+        return self.record.query_qualities[self.seqPos] if self.inSeq else None
 
+    @baseQual.setter
     def setBaseQual(self, qual: int) -> bool:
-        if self.inSeq():
-            self.record.query_alignment_qualities[self.seqPos] = qual
+        if self.inSeq:
+            self.record.query_qualities[self.seqPos] = qual
         else:
             return False
         return True
 
-    def getOp(self) -> int:
+    @property
+    def op(self) -> int:
         return self.ops[self.opsI][0]
+
+    @property
+    def opRange(self):
+        return self.ops[self.opsI]

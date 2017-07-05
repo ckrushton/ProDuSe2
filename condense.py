@@ -3,7 +3,7 @@ from CigarIterator import CigarIterator, appendOrInc
 
 def condense(record: pysam.AlignedSegment):
 
-    if record.query_alignment_length == 0:
+    if record.reference_length == 0:
         # No work needs to be done
         return
     seq = ""
@@ -15,16 +15,16 @@ def condense(record: pysam.AlignedSegment):
         ops.append((pysam.CHARD_CLIP, clipped))
     lastPos = itr.opPos
     while itr.skipToNonRef(): # TODO: check for MD tag and add if not present
-        if itr.inSeq():
-            seq += itr.getSeqBase()
-            qual.append(itr.getBaseQual())
+        if itr.inSeq:
+            seq += itr.seqBase
+            qual.append(itr.baseQual)
         dist = itr.opPos - lastPos
         if dist > 0:
             appendOrInc(ops, [pysam.CREF_SKIP, dist])
-        if itr.getOp() == pysam.CMATCH:
+        if itr.op == pysam.CMATCH:
                 appendOrInc(ops, [pysam.CDIFF, 1])
         else:
-            appendOrInc(ops, [itr.getOp(), 1])
+            appendOrInc(ops, [itr.op, 1])
     record.query_sequence = seq
     record.query_qualities = qual
     record.cigartuples = ops
