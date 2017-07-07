@@ -158,7 +158,6 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
 
 if __name__ == '__main__':
     import getopt
-    import pybam
     from sys import stdout, stdin, stderr, argv
     threads = 1
     max_read_len = 1000
@@ -167,15 +166,19 @@ if __name__ == '__main__':
 
     #Command line options
     stderr.write("Clip Overlap v1.0\n")
-    ops, _ = getopt.gnu_getopt(argv[1:], 't:m:ho:s:')
+    ops, paths = getopt.gnu_getopt(argv[1:], 't:m:ho:s:')
     for op, val in ops:
         if op == '-h':
-            stderr.write("Clip overlapping reads from SAM/BAM/CRAM file piped to stdin.\n"
-                         "Use: clip.py [-t threads] [-m max_read_length] [< infile] [> outfile]\n"
+            stderr.write("Clip overlapping reads from SAM/BAM/CRAM file\n"
+                         "Use: clip.py [-t threads] [-m max_read_length] [input file path | < infile > outfile] [output file path]\n"
+                         "If no paths are given stdin and stdout are used.\n"
                          "-t # of threads to use for processing (Default=1)\n"
                          "-m Maximum possible read length in data (Default=1000)\n"
                          "-o [sbuc] Output format: s=SAM (Default), b=BAM compressed, bu=BAM uncompressed, c=CRAM\n"
-                         "-s [mcp] Buffering mode: m=Maintain input order, c=Maintain coordinate order (Requires sorted input), p=Output in arbitrary order (Minimal RAM, Default)\n")
+                         "-s [mcp] Buffering mode:\n"
+                         "\tm=Maintain input order\n"
+                         "\tc=Maintain coordinate order (Requires sorted input)\n"
+                         "\tp=Output in arbitrary order (Minimal RAM, Default)\n")
             exit()
         elif op == '-t':
             threads = int(val or 1)
@@ -188,42 +191,45 @@ if __name__ == '__main__':
     else:
         stderr.write("Use -h for help.\n")
 
-    #import multiprocessing
-    from collections import deque #TODO comment out for multithreading
-    pool = []
-    class qwrap(deque): #TODO comment out for multithreading
-        def get(self):
-            return self.popleft()
-        def put(self, item):
-            return self.append(item)
-        def empty(self):
-            return len(self) == 0
-        def task_done(self):
-            pass
+    import multiprocessing
 
-    queueIn = qwrap()#multiprocessing.JoinableQueue(3*threads)
-    queueOut = qwrap()#multiprocessing.JoinableQueue(3*threads)
+    #from collections import deque #TODO comment out for multithreading
+    pool = []
+    #class qwrap(deque): #TODO comment out for multithreading
+    #    def get(self):
+    #        return self.popleft()
+    #    def put(self, item):
+    #        return self.append(item)
+    #    def empty(self):
+    #        return len(self) == 0
+    #    def task_done(self):
+    #        pass
+
+    queueIn = multiprocessing.JoinableQueue(3*threads)
+    queueOut = multiprocessing.JoinableQueue(3*threads)
+    #queueIn = qwrap()
+    #queueOut = qwrap()
     mateBuffer = {}
-    inFile = pysam.AlignmentFile(stdin) #'/home/ncm3/data/singlePair250.bam') #
-    outFile = pysam.AlignmentFile(stdout, outFormat, template=inFile) #TODO comment out for threading
+    inFile = pysam.AlignmentFile(paths[0] if len(paths) else stdin)
+    #outFile = pysam.AlignmentFile(paths[1] if len(paths) > 1 else stdout, outFormat, template=inFile) #TODO comment out for threading
     def worker():
-        #while True: #TODO Uncomment for threading
-        if not queueIn.empty():
-            firstRecord, secondRecord = queueIn.get()
-            if firstRecord[1].reference_start < secondRecord[1].reference_start:
-                leftRecord = firstRecord[1]
-                rightRecord = secondRecord[1]
-            else:
-                rightRecord = firstRecord[1]
-                leftRecord = secondRecord[1]
-            mergeRecord(rightRecord, leftRecord)
-            trimRecord(rightRecord, leftRecord, leftRecord.reference_end)
-            queueOut.put(firstRecord)
-            queueOut.put(secondRecord)
-            queueIn.task_done()
+        while True: #TODO Uncomment for threading
+            if not queueIn.empty():
+                firstRecord, secondRecord = queueIn.get()
+                if firstRecord[1].reference_start < secondRecord[1].reference_start:
+                    leftRecord = firstRecord[1]
+                    rightRecord = secondRecord[1]
+                else:
+                    rightRecord = firstRecord[1]
+                    leftRecord = secondRecord[1]
+                mergeRecord(leftRecord, rightRecord)
+                trimRecord(leftRecord, rightRecord, rightRecord.reference_end)
+                queueOut.put(firstRecord)
+                queueOut.put(secondRecord)
+                queueIn.task_done()
 
     def writer():
-        outFile = pysam.AlignmentFile(stdout, outFormat, template=inFile)
+        outFile = pysam.AlignmentFile(paths[1] if len(paths) > 1 else stdout, outFormat, template=inFile)
         if bufferingMode == 'm':
             from sortedcontainers import SortedListWithKey
             writeBuffer = SortedListWithKey(key=lambda x: x[0])
@@ -243,11 +249,15 @@ if __name__ == '__main__':
                     queueOut.task_done()
         elif bufferingMode == 'c':
             from sortedcontainers import SortedListWithKey
-            writeBuffer = SortedListWithKey(key=lambda x: x[1].reference_start) #type: List[(int, pysam.AlignedSegment)]
-            lastPos = 0
+            sortBuffer = SortedListWithKey(key=lambda x: x[0]) #type: List[(int, pysam.AlignedSegment, int)]
+            writeBuffer = SortedListWithKey(key=lambda x: x[1].reference_start) #type: List[(int, pysam.AlignedSegment, int)]
+            nextIndex = 0  # type: int
             while True:
-                writeBuffer.add(queueOut.get())
-                while len(writeBuffer) and writeBuffer[-1][1].reference_start >= writeBuffer[0][1].reference_start + max_read_len:
+                sortBuffer.add(queueOut.get())
+                if len(sortBuffer) and sortBuffer[0][0] == nextIndex:
+                    writeBuffer.add(sortBuffer.pop(0))
+                    nextIndex += 1
+                if len(writeBuffer) > 2 and writeBuffer[-1][2] > writeBuffer[0][1].reference_start:
                     record = writeBuffer.pop(0)
                     outFile.write(record[1])
                     queueOut.task_done()
@@ -257,69 +267,71 @@ if __name__ == '__main__':
                 outFile.write(record[1])
                 queueOut.task_done()
 
-    #pool.append(multiprocessing.Process(target=writer))  #TODO uncomment for threading
-    #for _ in range(threads):
-    #    pool.append(multiprocessing.Process(target=worker))
-    #for p in pool:
-    #    p.start()
+    pool.append(multiprocessing.Process(target=writer))  #TODO uncomment for threading
+    for _ in range(threads):
+        pool.append(multiprocessing.Process(target=worker))
+    for p in pool:
+        p.start()
 
     #TODO Comment out for threading
-    from sortedcontainers import SortedListWithKey
-    if bufferingMode == 'm':
-        writeBuffer = SortedListWithKey(key=lambda x: x[0])
-    elif bufferingMode == 'c':
-        writeBuffer = SortedListWithKey(key=lambda x: x[1].reference_start)  # type: List[(int, pysam.AlignedSegment)]
-
-    nextIndex = 0  # type: int
+    #from sortedcontainers import SortedListWithKey
+    #if bufferingMode == 'm':
+    #    writeBuffer = SortedListWithKey(key=lambda x: x[0])
+    #elif bufferingMode == 'c':
+    #    writeBuffer = SortedListWithKey(key=lambda x: x[1].reference_start)  # type: List[(int, pysam.AlignedSegment)]
+    #
+    #nextIndex = 0  # type: int
     #---
 
     i = 0 # Tracks the order the records were read
     for record in inFile:
         #Skip clipping code if the records don't overlap
         #TODO Uncomment for threading
-        #if record.is_paired and record.reference_start-max_read_len < record.next_reference_start < record.reference_end:
-        #    secondRecord = mateBuffer.get(record.query_name, None)
-        #    if not secondRecord:
-        #        mateBuffer[record.query_name] = (i, record)
-        #    else:
-        #        queueIn.put(((i, record), secondRecord))
-        #else:
-        #    queueOut.put((i, record))
+        if record.is_paired and record.reference_start-max_read_len < record.next_reference_start < record.reference_end:
+            secondRecord = mateBuffer.get(record.query_name, None)
+            if not secondRecord:
+                mateBuffer[record.query_name] = (i, record, record.reference_start)
+            else:
+                queueIn.put(((i, record, record.reference_start), secondRecord))
+        else:
+            queueOut.put((i, record, record.reference_start))
         #---
         #TODO Comment out for treading
-        if record.is_paired and record.reference_start - max_read_len < record.next_reference_start < record.reference_end:
-            firstRecord = mateBuffer.get(record.query_name, None)
-            if not firstRecord:
-                mateBuffer[record.query_name] = (i, record)
-            else:
-                queueIn.put((firstRecord, (i, record)))
-                worker()
-                if bufferingMode == 'p':
-                    outFile.write(queueOut.get()[1])
-                    outFile.write(queueOut.get()[1])
-                else:
-                    writeBuffer.add(queueOut.get())
-                    writeBuffer.add(queueOut.get())
-        if bufferingMode == 'm':
-            while len(writeBuffer) and writeBuffer[0][0] == nextIndex:
-                r = writeBuffer.pop(0)
-                nextIndex += 1
-                outFile.write(r[1])
-        elif bufferingMode == 'c':
-            while len(writeBuffer) and writeBuffer[-1][1].reference_start >= writeBuffer[0][1].reference_start + max_read_len:
-                r = writeBuffer.pop(0)
-                outFile.write(r[1])
+        #if record.is_paired and record.reference_start - max_read_len < record.next_reference_start < record.reference_end:
+        #    firstRecord = mateBuffer.get(record.query_name, None)
+        #    if not firstRecord:
+        #        mateBuffer[record.query_name] = (i if bufferingMode == 'm' else record.reference_start, record)
+        #    else:
+        #        queueIn.put((firstRecord, (i if bufferingMode == 'm' else record.reference_start, record)))
+        #        worker()
+        #        if bufferingMode == 'p':
+        #            outFile.write(queueOut.get()[1])
+        #            outFile.write(queueOut.get()[1])
+        #        else:
+        #            writeBuffer.add(queueOut.get())
+        #            writeBuffer.add(queueOut.get())
+        #else:
+        #    writeBuffer.add((i if bufferingMode == 'm' else record.reference_start, record))
+        #if bufferingMode == 'm':
+        #    while len(writeBuffer) and writeBuffer[0][0] == nextIndex:
+        #        r = writeBuffer.pop(0)
+        #        nextIndex += 1
+        #        outFile.write(r[1])
+        #elif bufferingMode == 'c':
+        #    while len(writeBuffer) > 2 and writeBuffer[-1][0] > writeBuffer[0][1].reference_start and writeBuffer[-1][0] > writeBuffer[0][0]:
+        #        r = writeBuffer.pop(0)
+        #        outFile.write(r[1])
         #---
         i += 1
 
-    #queueIn.join() #TODO uncomment for threading
-    while not queueIn.empty():#TODO comment out for threading
-        worker()
+    queueIn.join() #TODO uncomment for threading
+    #while not queueIn.empty():#TODO comment out for threading
+    #    worker()
     for _, record in mateBuffer.items():
         queueOut.put(record)
-    #queueOut.join() #TODO uncomment for threading
-    if bufferingMode != 's':
-        for record in writeBuffer:#TODO comment out for threading
-            outFile.write(record[1])#TODO comment out for threading
+    queueOut.join() #TODO uncomment for threading
+    #if bufferingMode != 's':
+    #    for record in writeBuffer:#TODO comment out for threading
+    #        outFile.write(record[1])#TODO comment out for threading
     inFile.close()
-    outFile.close()
+    #outFile.close()
