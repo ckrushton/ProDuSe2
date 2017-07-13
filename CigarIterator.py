@@ -12,6 +12,7 @@ def appendOrInc(ops: list, op: list):
         ops.append(list(op))
 
 class CigarIterator(object):
+    __slots__ = 'record', 'ops', 'md', 'opsI', 'opPos', 'opStart', 'seqPos', 'refStart', 'refPos', 'mdI'
     def __init__(self, record: pysam.AlignedSegment):
         self.record = record
         self.ops = record.cigartuples or []  # List of CIGAR operations
@@ -39,7 +40,7 @@ class CigarIterator(object):
 
     @property
     def valid(self):
-        return self.opsI < len(self.ops)
+        return self.opsI < len(self.ops) and (self.opsI + 1 == len(self.ops) and self.opPos <= self.opEnd)
 
     def step(self, i: int):
         #TODO support negative step

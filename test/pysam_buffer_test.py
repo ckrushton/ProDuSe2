@@ -1,10 +1,27 @@
-import pysam
-import sortedcontainers
+import pysam, multiprocessing, sys
 
-f = pysam.AlignmentFile('/home/ncm3/data/normal.bam')
-c = sortedcontainers.SortedListWithKey(key=lambda x: x[1].reference_start)
-i = 0
-for record in f:
-    c.add((i, record))
-    i += 1
-    print(len(c))
+def p(pR):
+    c = pysam.AlignmentFile(pR.fileno())
+    d = pysam.AlignmentFile(sys.stdout, 'w', template=c)
+    for r in c.fetch(until_eof=True): d.write(r)
+    c.close()
+    d.close()
+
+a = pysam.AlignmentFile('/home/ncm3/data/singlePair250.bam')
+pR, pW = multiprocessing.Pipe(False)
+b = pysam.AlignmentFile(pW.fileno(), 'w', template=a)
+
+proc = multiprocessing.Process(target=p, args=(pR,))
+proc.start()
+
+for r in a: b.write(r)
+a.close()
+b.close()
+pW.close()
+
+#proc = multiprocessing.Process(target=p, args=(pR,))
+#proc.start()
+
+#p(pR)
+
+pass
