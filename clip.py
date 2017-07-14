@@ -3,7 +3,7 @@ import pysam
 from sys import maxsize
 from CigarIterator import CigarIterator, appendOrInc
 import multiprocessing, ctypes
-import signal
+import parapysam
 
 default_cost = {
     pysam.CMATCH: lambda x: -x,
@@ -158,64 +158,39 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
     # TODO update mapping quality
 
 class WorkerProcess(multiprocessing.Process):
-    # This is to deal with the fact that pysam locks up when waiting for input but gets EOF
-    _flushRecord = pysam.AlignedSegment()
-    _flushRecord.query_name = "___%!%DummyRecordShouldNotBeInOutput%!%___"
-    def __init__(self, template):
+    def __init__(self, header=None):
         super().__init__()
-        self.start(template)
+        self.start(header)
 
-    def start(self, template):
-        self.outPipeR, self.outPipeW = multiprocessing.Pipe(False)
-        self.inPipeR, self.inPipeW = multiprocessing.Pipe(False)
+    def start(self, header):
         self.orderPipeR, self.orderPipeW = multiprocessing.Pipe(False)
-        self.recordsIn = pysam.AlignmentFile(self.inPipeW.fileno(), 'wbu', template=template)
-        self._receiver = None
-        self.stopInputEvent = multiprocessing.Event()
-        self.stopOutputEvent = multiprocessing.Event()
+        self.recordsInR, self.recordsInW = parapysam.RecordPipe(header)
+        self.recordsOutR, self.recordsOutW = parapysam.RecordPipe(header)
         super().start()
 
     def run(self):
-        inStream = pysam.AlignmentFile(self.inPipeR.fileno(), check_sq=False, check_header = False)
-        inStreamItr = inStream.fetch(until_eof=True)
-        outStream = pysam.AlignmentFile(self.outPipeW.fileno(), 'wbu', template=inStream)
         try:
-            firstRecord = next(inStreamItr)
-            secondRecord = next(inStreamItr)
+            firstRecord = next(self.recordsInR)
+            secondRecord = next(self.recordsInR)
             while firstRecord and secondRecord:
-                if firstRecord.query_name != self._flushRecord.query_name and secondRecord.query_name != self._flushRecord.query_name:
-                    if firstRecord.reference_start < secondRecord.reference_start:
-                        leftRecord = firstRecord
-                        rightRecord = secondRecord
-                    else:
-                        rightRecord = firstRecord
-                        leftRecord = secondRecord
-                    mergeRecord(leftRecord, rightRecord)
-                    trimRecord(leftRecord, rightRecord, rightRecord.reference_end)
-                outStream.write(firstRecord)
-                outStream.write(secondRecord)
-                while not self.inPipeR.poll():
-                    if self.stopInputEvent.is_set():
-                        break
-                firstRecord = next(inStreamItr)
-                secondRecord = next(inStreamItr)
+                if firstRecord.reference_start < secondRecord.reference_start:
+                    leftRecord = firstRecord
+                    rightRecord = secondRecord
+                else:
+                    rightRecord = firstRecord
+                    leftRecord = secondRecord
+                mergeRecord(leftRecord, rightRecord)
+                trimRecord(leftRecord, rightRecord, rightRecord.reference_end)
+                self.recordsOutW.write(firstRecord)
+                self.recordsOutW.write(secondRecord)
+                firstRecord = next(self.recordsInR)
+                secondRecord = next(self.recordsInR)
         except StopIteration:
             pass
-        inStream.close()
-        self.inPipeR.close()
-        outStream.close()
-        self.outPipeW.close()
-        self.stopOutputEvent.set()
+        self.recordsOutW.close()
 
     def stop(self):
-        # Flush through 100 records to ensure the buffers don't contain any data
-        for i in range(100):
-            self._flushRecord.reference_start = i
-            self.recordsIn.write(self._flushRecord)
-        self.recordsIn.close()
-        self.inPipeW.close()
-        self.orderPipeW.close()
-        self.stopInputEvent.set()
+        self.recordsInW.close()
         self.join()
 
     def __del__(self):
@@ -223,38 +198,13 @@ class WorkerProcess(multiprocessing.Process):
         #super().__del__()
 
     def sendMatePair(self, index1, record1, index2, record2):
-        self.recordsIn.write(record1)
+        self.recordsInW.write(record1)
         self.orderPipeW.send(index1)
-        self.recordsIn.write(record2)
+        self.recordsInW.write(record2)
         self.orderPipeW.send(index2)
 
-    def getReceiver(self):
-        if not self._receiver and self.outPipeR.poll():
-            self._receiver = pysam.AlignmentFile(self.outPipeR.fileno(), check_sq=False, check_header = False)
-            self._receiverItr = self._receiver.fetch(until_eof=True)
-        return self._receiver
-
-    def receiveResult(self):
-        if self.stopOutputEvent.is_set() and not self.outPipeR.poll():
-            return False
-        if self.getReceiver() and self.outPipeR.poll():
-            try:
-                record = next(self._receiverItr)
-                if record:
-                    if record.query_name == self._flushRecord.query_name:
-                        self.stopOutputEvent.set()
-                        return False
-                    else:
-                        return (self.orderPipeR.recv(), record)
-            except StopIteration:
-                return False
-        return None
-
 class WriterProcess(multiprocessing.Process):
-    # This is to deal with the fact that pysam locks up when waiting for input but gets EOF
-    _flushRecord = pysam.AlignedSegment()
-    _flushRecord.query_name = "___%!%DummyRecordShouldNotBeInOutput%!%___"
-    def __init__(self, outFH, outFormat, pool, template, ordered):
+    def __init__(self, outFH, outFormat, pool, header, ordered):
         super().__init__()
         self.pool = pool
         self.ordered = ordered
@@ -262,25 +212,17 @@ class WriterProcess(multiprocessing.Process):
         self.outFormat = outFormat
         self.nextIndex = multiprocessing.RawValue(ctypes.c_long, 0)
         self.bufferedCount = multiprocessing.RawValue(ctypes.c_long, 0)
-        self.stopInputEvent = multiprocessing.Event()
-        self.start(template)
+        self.start(header)
 
-    def start(self, template):
-        self.inPipeR, self.inPipeW = multiprocessing.Pipe(False)
+    def start(self, header):
+        self.header = header
         self.orderPipeR, self.orderPipeW = multiprocessing.Pipe(False)
-        self.recordsIn = pysam.AlignmentFile(self.inPipeW.fileno(), 'wbu', template=template)
-        self._receiver = None
+        self.recordsOutR, self.recordsOutW = parapysam.RecordPipe(header)
+        self.recordsOutW.flush()
         super().start()
 
     def run(self):
-        receiver = None
-        while receiver == None:
-            for p in self.pool + [self]:
-                receiver = p.getReceiver()
-                if receiver:
-                    break
-        outFile = pysam.AlignmentFile(self.outFH, self.outFormat, template=receiver)
-
+        outFile = pysam.AlignmentFile(self.outFH, self.outFormat, header=self.header)
         if self.ordered:
             self.writeOrdered(outFile)
         else:
@@ -288,18 +230,10 @@ class WriterProcess(multiprocessing.Process):
         outFile.close()
 
     def stop(self):
-        # Flush through 100 records to ensure the buffers don't contain any data
-        for i in range(100):
-            self._flushRecord.reference_start = i
-            self.recordsIn.write(self._flushRecord)
-        self.recordsIn.close()
-        self.inPipeW.close()
-        self.orderPipeW.close()
-        self.stopInputEvent.set()
+        self.recordsOutW.close()
         for p in self.pool:
             p.stop()
         self.join()
-        self.inPipeR.close()
         self.orderPipeR.close()
 
     def __del__(self):
@@ -307,29 +241,8 @@ class WriterProcess(multiprocessing.Process):
         #super().__del__()
 
     def sendUnpaired(self, index, record):
-        self.recordsIn.write(record)
+        self.recordsOutW.write(record)
         self.orderPipeW.send(index)
-
-    def getReceiver(self):
-        if not self._receiver and self.inPipeR.poll():
-            self._receiver = pysam.AlignmentFile(self.inPipeR.fileno(), check_sq=False, check_header = False)
-            self._receiverItr = self._receiver.fetch(until_eof=True)
-        return self._receiver
-
-    def receiveResult(self):
-        if self.stopInputEvent.is_set() and not self.inPipeR.poll():
-            return False
-        if self.getReceiver() and self.inPipeR.poll():
-            try:
-                record = next(self._receiverItr)
-                if record:
-                    if record.query_name == self._flushRecord.query_name:
-                        return False
-                    else:
-                        return (self.orderPipeR.recv(), record)
-            except StopIteration:
-                return False
-        return None
 
     def writeOrdered(self, outFile):
         from sortedcontainers import SortedListWithKey
@@ -338,34 +251,37 @@ class WriterProcess(multiprocessing.Process):
         running = True
         while running:
             running = False
-            for p in self.pool + [self]:
-                result = p.receiveResult()
-                if result is not False:
-                    running = True
-                if result:
-                    if result[0] == self.nextIndex.value:
-                        self.nextIndex.value += 1
-                        outFile.write(result[1])
-                    else:
-                        writeBuffer.add(result)
-                        self.bufferedCount.value += 1
-                    while len(writeBuffer) and writeBuffer[0][0] == self.nextIndex.value:
-                        result = writeBuffer.pop(0)
-                        self.bufferedCount.value -= 1
-                        self.nextIndex.value += 1
-                        outFile.write(result[1])
+            for p in self.pool + [self]: #type: WorkerProcess
+                if p.recordsOutR.eof:
+                    continue
+                running = True
+                if not p.recordsOutR.poll():
+                    continue
+                result = (p.orderPipeR.recv(), p.recordsOutR.read())
+                if result[0] == self.nextIndex.value:
+                    self.nextIndex.value += 1
+                    outFile.write(result[1])
+                else:
+                    writeBuffer.add(result)
+                    self.bufferedCount.value += 1
+                while len(writeBuffer) and writeBuffer[0][0] == self.nextIndex.value:
+                    result = writeBuffer.pop(0)
+                    self.bufferedCount.value -= 1
+                    self.nextIndex.value += 1
+                    outFile.write(result[1])
 
     def write(self, outFile):
         running = True
         while running:
             running = False
-            for p in self.pool + [self]:
-                result = p.receiveResult()
-                if result is not False:
-                    running = True
-                if result:
-                    self.nextIndex = result[0]
-                    outFile.write(result[1])
+            for p in self.pool + [self]: #type: WorkerProcess
+                if p.recordsOutR.closed:
+                    continue
+                running = True
+                if not p.recordsOutR.poll():
+                    continue
+                self.nextIndex.value = p.orderPipeR.recv()
+                outFile.write(p.recordsOutW.read())
 
 def status(mateCount, bufferedCount, nextIndex):
     import time
@@ -383,9 +299,9 @@ def clip(paths, threads, maxTLen, outFormat, ordered, verbose):
 
     # Begin processing
     for _ in range(threads):
-        pool.append(WorkerProcess(inFile))
+        pool.append(WorkerProcess(inFile.header))
 
-    writer = WriterProcess(open(paths[1], 'wb+') if len(paths) > 1 else stdout, outFormat, pool, inFile, ordered)
+    writer = WriterProcess(open(paths[1], 'wb+') if len(paths) > 1 else stdout, outFormat, pool, inFile.header, ordered)
 
     def poolLooper():
         while True:
@@ -402,7 +318,7 @@ def clip(paths, threads, maxTLen, outFormat, ordered, verbose):
     i = 0  # Tracks the order the records were read
     for record in inFileItr:
         # Skip clipping code if the records don't overlap
-        if not record.is_unmapped and not record.mate_is_unmapped and record.is_paired and abs(record.template_length) < maxTLen and record.reference_name == record.next_reference_name: #record.reference_start - maxTLen < record.next_reference_start < record.reference_end:
+        if not record.is_unmapped and not record.mate_is_unmapped and not record.is_supplementary and record.is_paired and abs(record.template_length) < maxTLen and record.reference_name == record.next_reference_name: #record.reference_start - maxTLen < record.next_reference_start < record.reference_end:
             secondRecord = mateBuffer.get(record.query_name, None)
             if not secondRecord:
                 mateBuffer[record.query_name] = (i, record)
@@ -416,8 +332,6 @@ def clip(paths, threads, maxTLen, outFormat, ordered, verbose):
         i += 1
     inFile.close()
 
-    #for p in pool:
-    #    p.stop()
     for _, record in mateBuffer.items():
         mateCount.value -= 1
         writer.sendUnpaired(*record)

@@ -1,4 +1,5 @@
-class CommaSeperatedList(list):
+import ctypes
+class CommaSeparatedList(list):
     def __init__(self, values, value_type=int):
         if isinstance(values, list):
             super().__init__(values)
@@ -8,8 +9,8 @@ class CommaSeperatedList(list):
     def __str__(self):
         return ",".join(self)
 
-class Tag:
-    __slots__ = "TAG", "VALUE"
+class Tag(ctypes.Structure):
+    _fields_ = "TAG", "VALUE"
     def __init__(self, tag):
         if isinstance(tag, str):
             self.TAG, t, self.VALUE = tag.split(':', 3)
@@ -22,7 +23,7 @@ class Tag:
             elif t == 'H':
                 raise NotImplementedError()
             elif t == 'B':
-                self.VALUE = CommaSeperatedList(self.VALUE)
+                self.VALUE = CommaSeparatedList(self.VALUE)
         elif isinstance(tag, tuple):
             if len(tag) == 2:
                 self.TAG, self.VALUE = tag
@@ -40,9 +41,9 @@ class Tag:
             else:
                 self.TAG, self.VALUE, self.TYPE = tag
 
-class SAMRecord:
-    __slots__ = "query_name", "flag", "reference_name", "reference_start", "mapping_quality", "cigartuples", "next_reference_name", "next_reference_start", "template_length", "query_sequence", "query_qualities", "_tags", "_tags_unparsed"
-    _slot_parsers = (str, int, str, int, int, list, str, int, int, str, CommaSeperatedList)
+class SAMRecord(ctypes.Structure):
+    _fields_ = "query_name", "flag", "reference_name", "reference_start", "mapping_quality", "cigartuples", "next_reference_name", "next_reference_start", "template_length", "query_sequence", "query_qualities", "_tags", "_tags_unparsed"
+    _slot_parsers = (str, int, str, int, int, list, str, int, int, str, CommaSeparatedList)
     def __init__(self, other: 'SAMRecord' = None):
         if isinstance(other, str):
             currentPos = 0
