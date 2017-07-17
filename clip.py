@@ -45,24 +45,39 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
     #if end >= record.reference_end:
     #    end = record.reference_end-1
     ops = []
-    nextMatch = None # Retain the first match after clipping to avoid setting the new start position to a deletion
+
+    # Retain the first match after clipping to avoid setting the new start position to a deletion
+    nextMatch = None
     i = CigarIterator(record)
+    def checkForFirstMatch():
+        nonlocal nextMatch, i
+        if nextMatch is None and i.op in (pysam.CMATCH, pysam.CEQUAL, pysam.CDIFF):
+            nextMatch = i.refPos
+
+    #Jump past hard clipping and retain op
     hard = i.skipClipped(True)
     if hard: ops += [(pysam.CHARD_CLIP, hard)]
+    #Skip to reference starting position
     if i.skipToRefPos(start):
+        #Soft clip everything before start
         appendOrInc(ops, [pysam.CSOFT_CLIP, i.seqPos])
-        appendOrInc(ops, [i.op, i.opEnd - i.opPos +1])
-        if i.op in (pysam.CMATCH, pysam.CEQUAL, pysam.CDIFF): # Are we there yet?
-            nextMatch = i.refPos
-        dist = end - i.refPos
+        dist = end - i.refPos #Calculate reference distance remaining to end
+
+        #Retain remainder of current op if ends before end
+        if i.opRemaining <= dist:
+            appendOrInc(ops, [i.op, i.opRemaining])
+            if i.inRef: dist -= i.opRemaining
+        checkForFirstMatch()
+
+        #Copy in all ops before end
         while dist > i.opLength and i.nextOp():
-            if nextMatch is None and i.op in (pysam.CMATCH, pysam.CEQUAL, pysam.CDIFF): # Are we there yet?
-                nextMatch = i.refPos
+            checkForFirstMatch()
             appendOrInc(ops, i.ops[i.opsI])
             if i.inRef: dist -= i.opLength
+
+        #If more operations remain, copy in remainder
         if i.valid and dist <= i.opLength:
-            if nextMatch is None and i.op in (pysam.CMATCH, pysam.CEQUAL, pysam.CDIFF): # Are we there yet?
-                nextMatch = i.refPos
+            checkForFirstMatch()
             appendOrInc(ops, [i.op, dist])
             appendOrInc(ops, [pysam.CSOFT_CLIP, i.opLength - dist])
         appendOrInc(ops, [pysam.CSOFT_CLIP, i.record.query_length - i.seqPos])
@@ -70,6 +85,8 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
         #Soft clip entire read
         appendOrInc(ops, [pysam.CSOFT_CLIP, record.query_length])
         nextMatch = start
+
+    #Update record
     record.cigartuples = ops
     record.reference_start = nextMatch
     # TODO update mapping quality
@@ -77,13 +94,13 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
     mate.next_reference_start = record.reference_start
 
 def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment, refStart: int = -1, refEnd: int = maxsize, costs = default_cost) -> list:
-    rStart = fromRecord.reference_start if fromRecord.reference_start > toRecord.reference_start else toRecord.reference_start
-    rEnd = (fromRecord.reference_end if fromRecord.reference_end < toRecord.reference_end else toRecord.reference_end) - 1
+    overlapStart = fromRecord.reference_start if fromRecord.reference_start > toRecord.reference_start else toRecord.reference_start
+    overlapEnd = (fromRecord.reference_end if fromRecord.reference_end < toRecord.reference_end else toRecord.reference_end) - 1
 
-    if refStart < rStart:
-        refStart = rStart
-    if refEnd > rEnd:
-        refEnd = rEnd
+    if refStart < overlapStart:
+        refStart = overlapStart
+    if refEnd > overlapEnd:
+        refEnd = overlapEnd
 
     if fromRecord.reference_length == 0 or toRecord.reference_length == 0 or refStart >= refEnd:
         #No work needs to be done
@@ -112,7 +129,7 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
 
     while toItr.refPos <= refEnd or fromItr.refPos <= refEnd:
         if toItr.op == fromItr.op:
-            if toItr.inSeq:  #.getOp() in [pysam.CMATCH, pysam.CEQUAL, pysam.CDIFF]:
+            if toItr.inSeq:
                 if toItr.baseQual == fromItr.baseQual:
                     r = toItr if not toItr.matchesRef else fromItr
                     seq += r.seqBase #Keep the variant if possible
@@ -180,7 +197,7 @@ class WorkerProcess(multiprocessing.Process):
                     rightRecord = firstRecord
                     leftRecord = secondRecord
                 mergeRecord(leftRecord, rightRecord)
-                trimRecord(leftRecord, rightRecord, rightRecord.reference_end)
+                trimRecord(leftRecord, rightRecord, 0, rightRecord.reference_start)
                 self.recordsOutW.write(firstRecord)
                 self.recordsOutW.write(secondRecord)
                 firstRecord = next(self.recordsInR)
@@ -285,10 +302,11 @@ class WriterProcess(multiprocessing.Process):
 
 def status(mateCount, bufferedCount, nextIndex):
     import time
-    status = ''
+    lastIndex = nextIndex.value
     while True:
-        status = "\rMates buffered: {:>10}\tPending output: {:>10}\tWaiting for read number: {:>10}\t".format(mateCount.value, bufferedCount.value, nextIndex.value)
+        status = "\rMates buffered: {:>10}\tPending output: {:>10}\tRecords per second: ~{:>10}\tWaiting for read number: {:>10}\t".format(mateCount.value, bufferedCount.value, nextIndex.value - lastIndex, nextIndex.value)
         stderr.write(status)
+        lastIndex = nextIndex.value
         time.sleep(1)
 
 def clip(paths, threads, maxTLen, outFormat, ordered, verbose):

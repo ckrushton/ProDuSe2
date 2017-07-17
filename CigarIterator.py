@@ -134,6 +134,10 @@ class CigarIterator(object):
         else:
             return self.opStart + l - 1
 
+    @property
+    def opRemaining(self):
+        return self.opLength - (self.opPos - self.opStart)
+
     def skipClipped(self, hardOnly: bool = False) -> int:
         count = 0
         if self.opLength > 0:

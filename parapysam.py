@@ -1,4 +1,4 @@
-import multiprocessing, pysam, threading
+import multiprocessing, pysam, threading, queue
 
 class RecordPipe:
     _flushRecordName = "___%!%DummyRecordShouldNotBeInOutput%!%___"
@@ -42,7 +42,7 @@ class RecordInPipe:
     def write(self, record):
         if not self._hts:
             self._hts = pysam.AlignmentFile(self._pipe, 'wbu', header=self._header)
-            self.flush()
+            #self.flush()
         self._hts.write(record)
 
 class RecordOutPipe:
@@ -51,10 +51,9 @@ class RecordOutPipe:
         self._closeEvent = closeEvent
         self._hts = None
         self._htsItr = None
-        self._nextRecord = None
+        self._nextRecord = queue.Queue()
+        self._flushing = multiprocessing.Event()
         self._thread = None
-        self._recordAvailable = threading.Event()
-        self._getNextRecord = threading.Event()
 
     def _initHTS(self):
         if not self._thread:
@@ -72,7 +71,7 @@ class RecordOutPipe:
 
     @property
     def eof(self):
-        return self.closed and not self.poll() and self._nextRecord and self._nextRecord.query_name == RecordPipe._flushRecordName
+        return self.closed and self._flushing.is_set() and self._nextRecord.empty()
 
     def __del__(self):
         self.close()
@@ -81,35 +80,34 @@ class RecordOutPipe:
         if not self._htsItr:
             self._hts = pysam.AlignmentFile(self._pipe.fileno(), check_header=False, check_sq=False)
             self._htsItr = self._hts.fetch(until_eof=True)
-        while not self.eof:
-            self._nextRecord = next(self._htsItr)
-            while self._nextRecord.query_name == RecordPipe._flushRecordName:
-                self._nextRecord = next(self._htsItr)
-            self._recordAvailable.set()
-            self._getNextRecord.wait()
-            self._getNextRecord.clear()
+        try:
+            while not self.eof:
+                record = next(self._htsItr)
+                while record.query_name == RecordPipe._flushRecordName:
+                    self._flushing.set()
+                    record = next(self._htsItr)
+                self._flushing.clear()
+                self._nextRecord.put(record)
+        except StopIteration:
+            pass
 
     def poll(self):
         self._initHTS()
-        return self._recordAvailable.is_set()
+        return not self._nextRecord.empty()
 
     def read(self):
         self._initHTS()
-        self._getNextRecord.set()
-        self._recordAvailable.wait()
-        self._recordAvailable.clear()
-        return self._nextRecord
+        return self._nextRecord.get()
 
     def __iter__(self):
         return self
 
     def __next__(self):
         self._initHTS()
-        self._getNextRecord.set()
         while True:
-            if self._recordAvailable.wait(0.1):
-                self._recordAvailable.clear()
-                return self._nextRecord
-            elif self.closed:
-                self.close()
-                raise StopIteration
+            try:
+                return self._nextRecord.get(True, 1)
+            except queue.Empty:
+                if self.closed:
+                    self.close()
+                    raise StopIteration
