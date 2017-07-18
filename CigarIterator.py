@@ -15,7 +15,7 @@ class CigarIterator(object):
     __slots__ = 'record', 'ops', 'md', 'opsI', 'opPos', 'opStart', 'seqPos', 'refStart', 'refPos', 'mdI'
     def __init__(self, record: pysam.AlignedSegment):
         self.record = record
-        self.ops = record.cigartuples or []  # List of CIGAR operations
+        self.ops = record.cigartuples or ()  # List of CIGAR operations
         self.md = None  # Reference bases from MD tag
         self.rewind()
 
@@ -40,7 +40,7 @@ class CigarIterator(object):
 
     @property
     def valid(self):
-        return self.opsI < len(self.ops) and (self.opsI + 1 == len(self.ops) and self.opPos <= self.opEnd)
+        return self.opsI < len(self.ops) and (self.opsI + 1 != len(self.ops) or self.opPos <= self.opEnd)
 
     def step(self, i: int):
         #TODO support negative step
@@ -179,6 +179,7 @@ class CigarIterator(object):
     def skipToRefPos(self, pos): # Pos is in reference space
         if self.opPos < 0:
             self.opPos = 0
+        self.skipClipped()
         dist = pos - self.refPos
         while dist > 0:
             if self.inRef:

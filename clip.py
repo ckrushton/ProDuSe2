@@ -63,7 +63,7 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
         appendOrInc(ops, [pysam.CSOFT_CLIP, i.seqPos])
         dist = end - i.refPos #Calculate reference distance remaining to end
 
-        #Retain remainder of current op if ends before end
+        #Retain remainder of current op if op ends before end
         if i.opRemaining <= dist:
             appendOrInc(ops, [i.op, i.opRemaining])
             if i.inRef: dist -= i.opRemaining
