@@ -34,7 +34,7 @@ def calculateAlignmentCost(record: pysam.AlignedSegment, start: int = 0, end: in
     return cost
 
 def calculateMappingQuality(record: pysam.AlignedSegment) -> int:
-    pass #TODO
+    return record.mapping_quality #TODO
 
 def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: int = 0, end: int = maxsize):
     if start > end:
@@ -89,7 +89,7 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
     #Update record
     record.cigartuples = ops
     record.reference_start = nextMatch
-    # TODO update mapping quality
+    record.mapping_quality = calculateMappingQuality(record)
     # TODO rewrite MD
     mate.next_reference_start = record.reference_start
 
@@ -292,13 +292,13 @@ class WriterProcess(multiprocessing.Process):
         while running:
             running = False
             for p in self.pool + [self]: #type: WorkerProcess
-                if p.recordsOutR.closed:
+                if p.recordsOutR.eof:
                     continue
                 running = True
                 if not p.recordsOutR.poll():
                     continue
                 self.nextIndex.value = p.orderPipeR.recv()
-                outFile.write(p.recordsOutW.read())
+                outFile.write(p.recordsOutR.read())
 
 def status(mateCount, bufferedCount, nextIndex):
     import time

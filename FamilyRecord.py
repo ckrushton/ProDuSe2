@@ -56,11 +56,11 @@ class FamilyRecord:
         i = 0
         while recordItr.next():
             if len(self.cols) < i:
-                op = self.Op(recordItr.op(), recordItr.seqBase())
-                op += recordItr.baseQual() or 0
+                op = self.Op(recordItr.op, recordItr.seqBase)
+                op += recordItr.baseQual or 0
                 self.cols.append(sortedcontainers.SortedListWithKey(key=lambda x: (x.op, x.allele), iterable=[op]))
             else:
-                self.cols[i][(recordItr.op(), recordItr.seqBase())] += recordItr.baseQual() or 0
+                self.cols[i][(recordItr.op, recordItr.seqBase)] += recordItr.baseQual or 0
             i += 1
 
     def __iadd__(self, other):
