@@ -81,12 +81,12 @@ YAMLLoader = Loader
 YAMLLoader.add_constructor(u'!concat', construct_concat)
 YAMLLoader.add_constructor(u'!ignore', construct_ignored)
 
-def handleArgs(args: list, functions: list, configParam = '--config'):
+def handleArgs(args: list, functions: tuple, configParam = '--config'):
     optlist, params = gnu_getopt(args, '', ['config=',])
     for opt, val in optlist:
         if opt == '--config':
             if not (os.path.isfile(val) and os.access(val, os.R_OK)):
-                raise FileNotFoundError("The passed config path was not found: {}".format(args[i]))
+                raise FileNotFoundError("The passed config path was not found: {}".format(val))
             cfgs = ruamel.yaml.load_all(open(val), YAMLLoader)
             for cfg in cfgs:
                 argMap = {}
