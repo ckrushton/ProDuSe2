@@ -112,7 +112,7 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
     #Copy in unaffected ops in non-overlapping region
     dist = refStart - toItr.refStart
     if not toItr.nextOp(): return
-    while dist > toItr.opLength:
+    while not toItr.inRef or dist > toItr.opLength:
         appendOrInc(ops, list(toItr.opRange))
         if toItr.inRef: dist -= toItr.opLength
         if not toItr.nextOp(): return

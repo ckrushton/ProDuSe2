@@ -2,7 +2,7 @@ import re
 import os
 from getopt import gnu_getopt
 from asciimatics.screen import Screen
-from time import sleep
+from inspect import Signature, Parameter
 
 from tator import normaliseArgs
 from valitator import validate
@@ -24,7 +24,7 @@ def generate(functions: list):
         config[func.__name__] = params
     return config
 
-def map(func, yaml_node) -> list:
+def map(func, yaml_node) -> dict:
     if hasattr(func, '__cfgMap__') and '_func' in func.__cfgMap__:
         yaml_node = yaml_node.get(func.__cfgMap__['_func'], yaml_node)
     args = {}
@@ -96,10 +96,11 @@ def handleArgs(args: list, functions: tuple, configParam = '--config'):
                         argMap[f] = mapping
                         validate(f, mapping)
                     yield argMap
-        # else:
-        #     screen = Screen.open(3)
-        #     screen.print_at("Hello", 0, 0)
-        #     screen.refresh()
-        #     sleep(10)
-        #     screen.close()
+            return
+        else:
+            screen = Screen.open(3)
+            screen.print_at("Hello", 0, 0)
+            screen.refresh()
+            sleep(10)
+            screen.close()
 

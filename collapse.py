@@ -5,10 +5,10 @@ from configutator import ConfigMap
 import Levenshtein
 from FamilyRecord import FamilyRecord
 
-@ConfigMap(inFile=None, outFile=None)
-def collapse(inFilePath: str, outFilePath: str, barcode_distance: int, barcode_mask: str):
-    inFile = pysam.AlignmentFile(inFilePath)
-    outFile = pysam.AlignmentFile(outFilePath, "rb")
+@ConfigMap(inFilePath=None, outFilePath=None)
+def collapse(barcode_distance: int, barcode_mask: str, inFilePath: str = None, outFilePath: str = None):
+    inFile = pysam.AlignmentFile(inFilePath or sys.stdin)
+    outFile = pysam.AlignmentFile(outFilePath or sys.stdout, "rb")
     records = sortedcontainers.SortedDict() #SortedListWithKey(key=lambda x: x.name)
     startPos = 0
     for record in inFilePath.fetch(until_eof=True):

@@ -2,6 +2,7 @@ import types
 import os
 import typing
 from typing import NewType
+from inspect import Signature
 
 
 from tator import normaliseArgs
