@@ -58,7 +58,7 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
     hard = i.skipClipped(True)
     if hard: ops += [(pysam.CHARD_CLIP, hard)]
     #Skip to reference starting position
-    if i.skipToRefPos(start):
+    if start < end and i.skipToRefPos(start):
         #Soft clip everything before start
         appendOrInc(ops, [pysam.CSOFT_CLIP, i.seqPos])
         dist = end - i.refPos #Calculate reference distance remaining to end
@@ -84,6 +84,8 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
     else:
         #Soft clip entire read
         appendOrInc(ops, [pysam.CSOFT_CLIP, record.query_length])
+        if record.cigartuples[-1][0] == pysam.CHARD_CLIP:
+            appendOrInc(ops, record.cigartuples[-1])
         nextMatch = start
 
     #Update record
@@ -360,7 +362,7 @@ def clip(paths, threads, maxTLen, outFormat, ordered, verbose):
 if __name__ == '__main__':
     import getopt
     from sys import stdout, stdin, stderr, argv
-    threads = 1
+    threads = 2
     maxTLen = 1000
     outFormat = 'w'
     ordered = False
