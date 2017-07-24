@@ -75,11 +75,12 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
             appendOrInc(ops, i.ops[i.opsI])
             if i.inRef: dist -= i.opLength
 
-        #If more operations remain, copy in remainder
+        #If end within op, copy in remainder
         if i.valid and dist <= i.opLength:
             checkForFirstMatch()
             appendOrInc(ops, [i.op, dist])
             appendOrInc(ops, [pysam.CSOFT_CLIP, i.opLength - dist])
+            i.stepOp()
         appendOrInc(ops, [pysam.CSOFT_CLIP, i.record.query_length - i.seqPos])
     else:
         #Soft clip entire read
