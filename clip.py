@@ -42,8 +42,8 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
         return
     if start < record.reference_start:
         start = record.reference_start
-    #if end >= record.reference_end:
-    #    end = record.reference_end-1
+    if end >= record.reference_end:
+        end = record.reference_end-1
     ops = []
 
     # Retain the first match after clipping to avoid setting the new start position to a deletion
