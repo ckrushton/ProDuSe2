@@ -231,3 +231,9 @@ class CigarIterator(object):
     @property
     def opRange(self):
         return self.ops[self.opsI]
+
+    def __repr__(self):
+        if self.valid:
+            return "{} Op:{}{} CigPos:{} RefPos:{} SeqPos:{} Base:{} Quality:{} RefBase:{}".format(self.record.query_name, self.opLength, "MIDNSHP=XB"[self.op], self.opPos, self.refPos, self.seqPos, self.seqBase, self.baseQual, self.refBase)
+        else:
+            return "{} INVALID".format(self.record.query_name)
