@@ -42,8 +42,8 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
         return
     if start < record.reference_start:
         start = record.reference_start
-    if end >= record.reference_end:
-        end = record.reference_end-1
+    #if end >= record.reference_end:
+    #    end = record.reference_end-1
     ops = []
 
     # Retain the first match after clipping to avoid setting the new start position to a deletion
@@ -63,35 +63,32 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
         appendOrInc(ops, [pysam.CSOFT_CLIP, i.seqPos])
         dist = end - i.refPos #Calculate reference distance remaining to end
 
-        #Retain remainder of current op if op ends before end
-        if i.opRemaining <= dist:
+        #Copy in all ops before end
+        while dist > i.opRemaining or not i.inRef:
+            checkForFirstMatch()
             appendOrInc(ops, [i.op, i.opRemaining])
             if i.inRef: dist -= i.opRemaining
-        checkForFirstMatch()
-
-        #Copy in all ops before end
-        while dist > i.opLength and i.nextOp():
-            checkForFirstMatch()
-            appendOrInc(ops, i.ops[i.opsI])
-            if i.inRef: dist -= i.opLength
+            if not i.nextOp(): break
 
         #If end within op, copy in remainder
-        if i.valid and dist <= i.opLength:
+        if i.valid:
             checkForFirstMatch()
             appendOrInc(ops, [i.op, dist])
-            appendOrInc(ops, [pysam.CSOFT_CLIP, i.opLength - dist])
-            i.stepOp()
-        appendOrInc(ops, [pysam.CSOFT_CLIP, i.record.query_length - i.seqPos])
+            if not i.inSeq: dist = 0
+            appendOrInc(ops, [pysam.CSOFT_CLIP, i.record.query_length - i.seqPos - dist])
+            # Retain hard clip at end
+            if len(i.ops) and i.ops[-1][0] == pysam.CHARD_CLIP:
+                appendOrInc(ops, i.ops[-1])
     else:
         #Soft clip entire read
         appendOrInc(ops, [pysam.CSOFT_CLIP, record.query_length])
-        if record.cigartuples[-1][0] == pysam.CHARD_CLIP:
-            appendOrInc(ops, record.cigartuples[-1])
-        nextMatch = start
+        #Retain hard clip at end
+        if len(i.ops) and i.ops[-1][0] == pysam.CHARD_CLIP:
+            appendOrInc(ops, i.ops[-1])
 
     #Update record
     record.cigartuples = ops
-    record.reference_start = nextMatch
+    if nextMatch is not None: record.reference_start = nextMatch
     record.mapping_quality = calculateMappingQuality(record)
     # TODO rewrite MD
     mate.next_reference_start = record.reference_start
