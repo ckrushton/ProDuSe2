@@ -122,12 +122,13 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
     seq = toRecord.query_sequence[:toItr.seqPos]
     qual = list(toRecord.query_qualities[:toItr.seqPos])
 
+    #Init fromRecord iterator
     fromItr = CigarIterator(fromRecord)
     if not fromItr.skipToRefPos(refStart): return
 
     toOptimal = None
 
-    while toItr.refPos <= refEnd or fromItr.refPos <= refEnd:
+    while toItr.refPos <= refEnd and fromItr.refPos <= refEnd:
         if toItr.op == fromItr.op:
             if toItr.inSeq:
                 if toItr.baseQual == fromItr.baseQual:
@@ -164,15 +165,17 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
             break
         if not toItr.next():
             break
-    while toItr.next():  # Copy remainder of toRecord
+    while toItr.valid:  # Copy remainder of toRecord
         if toItr.inSeq:
             seq += toItr.seqBase
             qual += [toItr.baseQual]
         appendOrInc(ops, [toItr.op, 1])
+        toItr.next()
     toRecord.cigartuples = ops
     toRecord.query_sequence = seq
     toRecord.query_qualities = qual
     # TODO update mapping quality
+    # TODO Store tag for which strand the base originated from
 
 class WorkerProcess(multiprocessing.Process):
     def __init__(self, header=None):
@@ -309,17 +312,17 @@ def status(mateCount, bufferedCount, nextIndex):
         lastIndex = nextIndex.value
         time.sleep(1)
 
-def clip(paths, threads, maxTLen, outFormat, ordered, verbose):
+def clip(inStream, outStream, threads, maxTLen, outFormat, ordered, verbose):
     pool = []
     mateBuffer = {}
-    inFile = pysam.AlignmentFile(paths[0] if len(paths) else stdin)
+    inFile = pysam.AlignmentFile(inStream)
     inFileItr = inFile.fetch(until_eof=True)
 
     # Begin processing
     for _ in range(threads):
         pool.append(WorkerProcess(inFile.header))
 
-    writer = WriterProcess(open(paths[1], 'wb+') if len(paths) > 1 else stdout, outFormat, pool, inFile.header, ordered)
+    writer = WriterProcess(outStream, outFormat, pool, inFile.header, ordered)
 
     def poolLooper():
         while True:
@@ -394,4 +397,4 @@ if __name__ == '__main__':
             elif op == '-v':
                 verbose = True
 
-    clip(paths, threads, maxTLen, outFormat, ordered, verbose)
+    clip(paths[0] if len(paths) else stdin, open(paths[1], 'wb+') if len(paths) > 1 else stdout, threads, maxTLen, outFormat, ordered, verbose)
