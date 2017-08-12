@@ -1,16 +1,13 @@
---- !ignore #Defaults
-sample: &sample default
 default: &default
-  output: !concat [*sample, .bam]
+  output: /home/ncm3/data/Ly17/
   reference: /home/ncm3/data/GRCh38_no_alt.fa #/morinlab/reference/igenomes/Homo_sapiens/GSC/GRCh38/Sequence/WholeGenomeFasta/GRCh38_no_alt.fa
-  bwa: bwa mem -t 10
+  bwa: bwa mem -t10
 
   trim: &trim_default
-    barcode_mask: "0001111111111110"
     barcode_distance: 3
 
   collapse: &collapse_default
-    barcode_mask: "0000000001111110"
+    barcode_mask: "000SSS0001111110"
     barcode_distance: 3
 
   filter: &filter_default
@@ -19,83 +16,75 @@ default: &default
     variant_allele_fraction_threshold: 0.01
     min_reads_per_uid: 1
 
-# Samples
----
-sample: &sample CALM-0001
-<<: *default     # Inherit default parameters
-fastqs:
-  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CALM-0001-1FD-1RD_S9_L001_R1_001.fastq.gz
-  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CALM-0001-1FD-1RD_S9_L001_R2_001.fastq.gz
-trim:
-  <<: *trim_default
-  barcode_sequence: NNNSWKYWSRWMKWWT
+samples:
+  - name: CALM-0001
+    <<: *default     # Inherit default parameters
+    fastqs:
+      - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CALM-0001-1FD-1RD_S9_L001_R1_001.fastq.gz
+      - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CALM-0001-1FD-1RD_S9_L001_R2_001.fastq.gz
+    trim:
+      <<: *trim_default
+      barcode_sequence: NNNSWKYWSRWMKWWT
 
----
-sample: &sample CAKK-0003
-<<: *default     # Inherit default parameters
-fastqs:
-  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAKK-0003-A5-E5_S8_L001_R1_001.fastq.gz
-  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAKK-0003-A5-E5_S8_L001_R2_001.fastq.gz
-trim:
-  <<: *trim_default
-  barcode_sequence: NNNWSMRWSYRKMKWT
+  - name: CAKK-0003
+    <<: *default     # Inherit default parameters
+    fastqs:
+      - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAKK-0003-A5-E5_S8_L001_R1_001.fastq.gz
+      - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAKK-0003-A5-E5_S8_L001_R2_001.fastq.gz
+    trim:
+      <<: *trim_default
+      barcode_sequence: NNNWSMRWSYRKMKWT
 
----
-sample: &sample CAMP-0008
-<<: *default     # Inherit default parameters
-fastqs:
-  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0008-3FB-4RB_S10_L001_R1_001.fastq.gz
-  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0008-3FB-4RB_S10_L001_R2_001.fastq.gz
-trim:
-  <<: *trim_default
-  barcode_sequence: NNNSWMRSWYWMKWWT
+  - name: CAMP-0008
+    <<: *default     # Inherit default parameters
+    fastqs:
+      - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0008-3FB-4RB_S10_L001_R1_001.fastq.gz
+      - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0008-3FB-4RB_S10_L001_R2_001.fastq.gz
+    trim:
+      <<: *trim_default
+      barcode_sequence: NNNSWMRSWYWMKWWT
 
----
-sample: &sample CAMP-0010
-<<: *default     # Inherit default parameters
-fastqs:
-  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0010-6c-5d-Ly17-CAMP-0006-6-5b_S11_L001_R1_001.fastq.gz
-  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0010-6c-5d-Ly17-CAMP-0006-6-5b_S11_L001_R2_001.fastq.gz
-trim:
-  <<: *trim_default
-  barcode_sequence: NNNWSMRWSYWKMWWT
+  - name: CAMP-0010
+    <<: *default     # Inherit default parameters
+    fastqs:
+      - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0010-6c-5d-Ly17-CAMP-0006-6-5b_S11_L001_R1_001.fastq.gz
+      - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0010-6c-5d-Ly17-CAMP-0006-6-5b_S11_L001_R2_001.fastq.gz
+    trim:
+      <<: *trim_default
+      barcode_sequence: NNNWSMRWSYWKMWWT
 
----
-sample: &sample CAMP-0006
-<<: *default     # Inherit default parameters
-fastqs:
-  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0010-6c-5d-Ly17-CAMP-0006-6-5b_S11_L001_R1_001.fastq.gz
-  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0010-6c-5d-Ly17-CAMP-0006-6-5b_S11_L001_R2_001.fastq.gz
-trim:
-  <<: *trim_default
-  barcode_sequence: NNNWSMRWSYWKMWWT
+  - name: CAMP-0006
+    <<: *default     # Inherit default parameters
+    fastqs:
+      - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0010-6c-5d-Ly17-CAMP-0006-6-5b_S11_L001_R1_001.fastq.gz
+      - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CAMP-0010-6c-5d-Ly17-CAMP-0006-6-5b_S11_L001_R2_001.fastq.gz
+    trim:
+      <<: *trim_default
+      barcode_sequence: NNNWSMRWSYWKMWWT
 
----
-sample: &sample CASA-0002
-<<: *default     # Inherit default parameters
-fastqs:
-  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CASA-0002-6b-5e_S12_L001_R1_001.fastq.gz
-  - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CASA-0002-6b-5e_S12_L001_R2_001.fastq.gz
-trim:
-  <<: *trim_default
-  barcode_sequence: NNNWSMRWSYWKMWWT
+  - name: CASA-0002
+    <<: *default     # Inherit default parameters
+    fastqs:
+      - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CASA-0002-6b-5e_S12_L001_R1_001.fastq.gz
+      - /morinlab/data/miseq/2017-03-23-B3HW9/Ly17-CASA-0002-6b-5e_S12_L001_R2_001.fastq.gz
+    trim:
+      <<: *trim_default
+      barcode_sequence: NNNWSMRWSYWKMWWT
 
----
-sample: &sample 171FVTOP
-<<: *default     # Inherit default parameters
-fastqs:
-  - /home/crushton/ProDuSeDev/2017-01-27-B3DB3/171FVTOP_S27_L001_R1_001.fastq.gz
-  - /home/crushton/ProDuSeDev/2017-01-27-B3DB3/171FVTOP_S27_L001_R2_001.fastq.gz
-trim:
-  <<: *trim_default
-  barcode_sequence: NNNWSMRWSYWKMWWT
+  - name: 171FVTOP
+    <<: *default     # Inherit default parameters
+    fastqs:
+      - /home/crushton/ProDuSeDev/2017-01-27-B3DB3/171FVTOP_S27_L001_R1_001.fastq.gz
+      - /home/crushton/ProDuSeDev/2017-01-27-B3DB3/171FVTOP_S27_L001_R2_001.fastq.gz
+    trim:
+      <<: *trim_default
+      barcode_sequence: NNNWSMRWSYWKMWWT
 
----
-sample: &sample 358VCTOP
-<<: *default     # Inherit default parameters
-fastqs:
-  - /home/crushton/ProDuSeDev/2017-01-27-B3DB3/358VCTOP_S31_L001_R1_001.fastq.gz
-  - /home/crushton/ProDuSeDev/2017-01-27-B3DB3/358VCTOP_S31_L001_R2_001.fastq.gz
-trim:
-  <<: *trim_default
-  barcode_sequence: NNNSWMRSWYWMKWWT
+  - name: 358VCTOP
+    <<: *default     # Inherit default parameters
+    fastqs:
+      - /home/crushton/ProDuSeDev/2017-01-27-B3DB3/358VCTOP_S31_L001_R1_001.fastq.gz
+      - /home/crushton/ProDuSeDev/2017-01-27-B3DB3/358VCTOP_S31_L001_R2_001.fastq.gz
+    trim:
+      <<: *trim_default
+      barcode_sequence: NNNSWMRSWYWMKWWT
