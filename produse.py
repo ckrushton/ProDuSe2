@@ -1,26 +1,17 @@
 #!/usr/bin/env python3
-import os
+import sys, os, tempfile, shutil, gzip
 
 from collapse import collapse
-from clean import clean
-
+from clip import clip
 from trim import trim
-from multiprocessing import Process, Pipe
+
+from multiprocessing import Process
 from subprocess import Popen, PIPE
-from condense import condense
 
-import BEDtoRef
-from sortedcontainers import SortedList
-import pysam
-import gzip
-import sys
-import tempfile
-import shutil
-from configutator import ConfigMap, handleArgs
-
+from configutator import ConfigMap, loadConfig
 from valitator import Path, UnsignedInt, PathOrNone, Executable
 
-@ConfigMap(fastq1='fastqs[0]', fastq2='fastqs[1]', bwaArgs='bwa')
+@ConfigMap(fastq1='fastqs[0]', fastq2='fastqs[1]', bwaArgs='bwa', output='join(``, [name, `.bam`])')
 def ProDuSe(fastq1: Path, fastq2: Path, reference: str, bed: PathOrNone, output: str, bwaArgs: Executable):
     """
 
@@ -28,109 +19,71 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: str, bed: PathOrNone, output:
     :param fastq2: Path to the second fastq
     :param reference: Path to the reference fasta
     :param bed: Path to a bed file containing regions to restrict reads to (optional)
-    :param output:
-    :param bcThreshold:
-    :param familyThreshold:
-    :param sequence:
-    :param mask:
+    :param output: Path to output file
     :param bwaArgs:
     :return:
     """
-    # Just a heads up, the following code seems out of order. You have to follow the pipes to make sense of it. Good luck Mario ;)
     global config
+
     temp_dir = tempfile.mkdtemp()
     sys.stderr.write("Pipes created in {}\n".format(temp_dir))
-    # Load up bed file coordinates relative to reference index
-    if bed:
-        coords = BEDtoRef.BEDtoRef(pysam.TabixFile(bed), pysam.TabixFile(reference + ".fai"))
-        sys.stderr.write("BED regions loaded.\n")
-    else:
-        coords = None
-
     trimOut1Path = os.path.join(temp_dir, 'trimOut1')
     os.mkfifo(trimOut1Path)
     trimOut2Path = os.path.join(temp_dir, 'trimOut2')
     os.mkfifo(trimOut2Path)
-    sortInPath = os.path.join(temp_dir, 'sortIn')
-    sortOutPath = os.path.join(temp_dir, 'sortOut')
-    os.mkfifo(sortInPath)
-    os.mkfifo(sortOutPath)
-    bwaOutPath = os.path.join(temp_dir, 'bwaOut')
-    os.mkfifo(bwaOutPath)
 
-    # Start sort by coord
-    sys.stderr.write("Starting sort subprocess..\n")
-    sortp = Process(target=pysam.sort, args=("-o", sortOutPath, sortInPath))
-    sortp.start()
+    # Check if fastqs compressed
+    inFile1 = open(fastq1, 'rb')
+    if inFile1.peek(2)[:2] == b'\037\213':
+        inFile1 = gzip.open(inFile1)
+    inFile2 = open(fastq2, 'rb')
+    if inFile2.peek(2)[:2] == b'\037\213':
+        inFile2 = gzip.open(inFile2)
 
-    #Start clipping and filtering the bwa output
-    sys.stderr.write("Starting clipping and read filter subprocess..\n")
-    cfp = Process(target=clean, args=(bwaOutPath, sortInPath, coords))
-    cfp.start()
+    # Start trim subprocesses
+    trimProc1 = Process(target=trim, args=(inFile1, open(trimOut1Path, 'wb')))
+    trimProc1.start()
+    trimProc2 = Process(target=trim, args=(inFile2, open(trimOut2Path, 'wb')))
+    trimProc2.start()
 
     # Start bwa subprocess
     if isinstance(bwaArgs, str):
         bwaArgs = bwaArgs.split(' ')
     sys.stderr.write("Starting BWA subprocess..\n")
-    bwaArgs += ['-C', reference, trimOut1Path, trimOut2Path]
-    bwa = Popen(bwaArgs, stdout=open(bwaOutPath, 'w'))
+    bwa = Popen(bwaArgs + ['-C', reference, trimOut1Path, trimOut2Path], stdout=PIPE)
+    clipIn = bwa.stdout
 
-    # Start trim subprocesses
-    sys.stderr.write("Starting trim subprocesses..\n")
-    p1Result = []
-    p1 = Process(target=callRes, args=(trim, dict(inStream=gzip.open(fastq1), outStream=open(trimOut1Path, 'w'), **config[trim]), p1Result))
-    p1.start()
-    p2Result = []
-    p2 = Process(target=callRes, args=(trim, dict(inStream=gzip.open(fastq2), outStream=open(trimOut2Path, 'w'), **config[trim]), p2Result))
-    p2.start()
+    if bed:
+        #Start samtools view to restrict to coordinates
+        sys.stderr.write("Starting samtools view subprocess..\n")
+        view = Popen(["samtools", "view", "-uL", bed, "-"], stdin=clipIn, stdout=PIPE)
+        clipIn = view.stdout
 
-    sortedBAM = pysam.AlignmentFile(sortOutPath, "r")
-    outputBAM = pysam.AlignmentFile(output, "wb", template=sortedBAM)
+    # Start sort by coord
+    sys.stderr.write("Starting sort subprocess..\n")
+    sort = Popen(["samtools", "sort", "-l0", "-"], stdout=PIPE, stdin=PIPE)
+
+    #Start clipping subprocess
+    sys.stderr.write("Starting clipping subprocess..\n")
+    clipProc = Process(target=clip, args=(clipIn, sort.stdin))
+    clipProc.start()
+
     sys.stderr.write("Starting collapse subprocess..\n")
-    collapseProc = Process(target=collapse, kwargs=dict(inFile=sortedBAM, outFile=outputBAM, **config[collapse]))
+    collapseProc = Process(target=collapse, kwargs=dict(inStream=sort.stdout, outStream=open(output, 'wb+'), **config[collapse]))
     collapseProc.start()
 
-    p1.join()
-    p2.join()
-    sortp.join()
-    cfp.join()
+    clipProc.join()
     collapseProc.join()
     bwa.wait()
+    inFile1.close()
+    inFile2.close()
     shutil.rmtree(temp_dir)
-
-def callRes(func, args, res: list):
-    "Process helper to retrieve return value of function"
-    res.append(func(**args))
-
-chrList = []
-def rangeCmp(a, b):
-    '''
-
-    :param a:
-    :param b:
-    :return:
-    '''
-
-    chr1 = a[1]
-    if chr1 not in chrList:
-        chrList.append(chr1)
-
-    chr2 = b[1]
-    if chr2 not in chrList:
-        chrList.append(chr2)
-
-    result = chrList.index(chr1) - chrList.index(chr2)
-
-    if result == 0:
-        result = a[2] - b[2]
-
-    return result
 
 if __name__ == "__main__":
     ConfigMap(_func='trim')(trim)
     ConfigMap(_func='collapse')(collapse)
-    for argmap in handleArgs(sys.argv, (ProDuSe, trim, collapse)):
+    for argmap in loadConfig(sys.argv, (ProDuSe, trim, collapse)):
         global config
         config = argmap
         ProDuSe(**argmap[ProDuSe])
-        break
+        break #TODO testing only, delete
