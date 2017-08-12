@@ -1,4 +1,8 @@
-import multiprocessing, pysam, threading, queue
+import multiprocessing, threading, queue, platform
+if platform.python_implementation() == 'PyPy':
+    import pypysam
+else:
+    import pysam
 
 class RecordPipe:
     _flushRecordName = "___%!%DummyRecordShouldNotBeInOutput%!%___"
@@ -111,3 +115,69 @@ class RecordOutPipe:
                 if self.closed:
                     self.close()
                     raise StopIteration
+
+class WorkerProcess(multiprocessing.Process):
+    def start(self, header):
+        self.header = header
+        self.recordsInR, self.recordsInW = RecordPipe(header)
+        self.recordsOutR, self.recordsOutW = RecordPipe(header)
+        self._inPID = multiprocessing.current_process().pid
+        super().start()
+
+    def run(self):
+        self.work()
+        self.recordsOutW.close()
+        self.recordsInR.close()
+
+    def stop(self, wait=True):
+        self.recordsInW.close()
+        self.recordsOutR.close()
+        if wait: self.join()
+
+    def __del__(self):
+        self.stop()
+
+    def sendRecord(self, record):
+        if multiprocessing.current_process().pid == self.pid:
+            self.recordsOutW.write(record)
+        else:
+            self.recordsInW.write(record)
+
+    def receiveRecord(self):
+        if multiprocessing.current_process().pid == self.pid:
+            return next(self.recordsInR)
+        else:
+            return next(self.recordsOutR)
+
+    def pollRecord(self):
+        if multiprocessing.current_process().pid == self.pid:
+            return self.recordsInR.poll()
+        else:
+            return self.recordsOutR.poll()
+
+    def checkEOF(self):
+        if multiprocessing.current_process().pid == self.pid:
+            return self.recordsInR.eof
+        else:
+            return self.recordsOutR.eof
+
+
+class OrderedWorker(WorkerProcess):
+    def start(self, header):
+        self.orderPipeR, self.orderPipeW = multiprocessing.Pipe(False)
+        super().start(header)
+
+    def stop(self, wait=True):
+        self.orderPipeW.close()
+        super().stop(wait)
+
+    def sendMatePair(self, index1, record1, index2, record2):
+        self.sendOrderedRecord(index1, record1)
+        self.sendOrderedRecord(index2, record2)
+
+    def sendOrderedRecord(self, index, record):
+        self.sendRecord(record)
+        self.orderPipeW.send(index)
+
+    def receiveOrderedRecord(self):
+        return (self.orderPipeR.recv(), self.receiveRecord())

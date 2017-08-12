@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-import pysam
+import platform
+if platform.python_implementation() == 'PyPy':
+    import pypysam
+else:
+    import pysam
 from sys import maxsize
 from CigarIterator import CigarIterator, appendOrInc
 import multiprocessing, ctypes
@@ -21,7 +25,7 @@ def calculateAlignmentCost(record: pysam.AlignedSegment, start: int = 0, end: in
     #if end > record.reference_end:
     #    end = record.reference_end
     if start > end:
-        #No works needs to be done
+        #No work needs to be done
         return cost
     i = CigarIterator(record)
     i.skipToRefPos(start)
@@ -34,7 +38,8 @@ def calculateAlignmentCost(record: pysam.AlignedSegment, start: int = 0, end: in
     return cost
 
 def calculateMappingQuality(record: pysam.AlignedSegment) -> int:
-    return record.mapping_quality #TODO
+    # Mapping quality isn't updated as it reflects the quality of the original alignment
+    return record.mapping_quality
 
 def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: int = 0, end: int = maxsize):
     if start > end:
@@ -177,21 +182,16 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
     # TODO update mapping quality
     # TODO Store tag for which strand the base originated from
 
-class WorkerProcess(multiprocessing.Process):
-    def __init__(self, header=None):
+class WorkerProcess(parapysam.OrderedWorker):
+    def __init__(self, alternate):
+        self.alternate = alternate
         super().__init__()
-        self.start(header)
 
-    def start(self, header):
-        self.orderPipeR, self.orderPipeW = multiprocessing.Pipe(False)
-        self.recordsInR, self.recordsInW = parapysam.RecordPipe(header)
-        self.recordsOutR, self.recordsOutW = parapysam.RecordPipe(header)
-        super().start()
-
-    def run(self):
+    def work(self):
+        flipflop = False
         try:
-            firstRecord = next(self.recordsInR)
-            secondRecord = next(self.recordsInR)
+            firstRecord = self.receiveRecord()
+            secondRecord = self.receiveRecord()
             while firstRecord and secondRecord:
                 if firstRecord.reference_start < secondRecord.reference_start:
                     leftRecord = firstRecord
@@ -199,32 +199,24 @@ class WorkerProcess(multiprocessing.Process):
                 else:
                     rightRecord = firstRecord
                     leftRecord = secondRecord
-                mergeRecord(leftRecord, rightRecord)
-                trimRecord(leftRecord, rightRecord, 0, rightRecord.reference_start)
-                self.recordsOutW.write(firstRecord)
-                self.recordsOutW.write(secondRecord)
-                firstRecord = next(self.recordsInR)
-                secondRecord = next(self.recordsInR)
+                # alternate clipped read to avoid strand bias
+                if self.alternate and flipflop:
+                    mergeRecord(rightRecord, leftRecord)
+                    trimRecord(rightRecord, leftRecord, leftRecord.reference_end-1)
+                    flipflop = False
+                else:
+                    mergeRecord(leftRecord, rightRecord)
+                    trimRecord(leftRecord, rightRecord, 0, rightRecord.reference_start)
+                    flipflop = True
+                self.sendRecord(firstRecord)
+                self.sendRecord(secondRecord)
+                firstRecord = self.receiveRecord()
+                secondRecord = self.receiveRecord()
         except StopIteration:
             pass
-        self.recordsOutW.close()
 
-    def stop(self):
-        self.recordsInW.close()
-        self.join()
-
-    def __del__(self):
-        self.stop()
-        #super().__del__()
-
-    def sendMatePair(self, index1, record1, index2, record2):
-        self.recordsInW.write(record1)
-        self.orderPipeW.send(index1)
-        self.recordsInW.write(record2)
-        self.orderPipeW.send(index2)
-
-class WriterProcess(multiprocessing.Process):
-    def __init__(self, outFH, outFormat, pool, header, ordered):
+class WriterProcess(parapysam.OrderedWorker):
+    def __init__(self, outFH, outFormat, pool, ordered, maxTLen):
         super().__init__()
         self.pool = pool
         self.ordered = ordered
@@ -232,16 +224,9 @@ class WriterProcess(multiprocessing.Process):
         self.outFormat = outFormat
         self.nextIndex = multiprocessing.RawValue(ctypes.c_long, 0)
         self.bufferedCount = multiprocessing.RawValue(ctypes.c_long, 0)
-        self.start(header)
+        self.maxTLen = maxTLen
 
-    def start(self, header):
-        self.header = header
-        self.orderPipeR, self.orderPipeW = multiprocessing.Pipe(False)
-        self.recordsOutR, self.recordsOutW = parapysam.RecordPipe(header)
-        self.recordsOutW.flush()
-        super().start()
-
-    def run(self):
+    def work(self):
         outFile = pysam.AlignmentFile(self.outFH, self.outFormat, header=self.header)
         if self.ordered:
             self.writeOrdered(outFile)
@@ -250,69 +235,68 @@ class WriterProcess(multiprocessing.Process):
         outFile.close()
 
     def stop(self):
-        self.recordsOutW.close()
+        super().stop(False)
         for p in self.pool:
             p.stop()
         self.join()
-        self.orderPipeR.close()
-
-    def __del__(self):
-        self.stop()
-        #super().__del__()
-
-    def sendUnpaired(self, index, record):
-        self.recordsOutW.write(record)
-        self.orderPipeW.send(index)
 
     def writeOrdered(self, outFile):
-        from sortedcontainers import SortedListWithKey
-        writeBuffer = SortedListWithKey(key=lambda x: x[0])
+        import heapq
+        class HeapNode:
+            __slots__ = 'key', 'value'
+            def __init__(self, key, value):
+                self.key, self.value = key, value
+            def __lt__(self, other):
+                return self.key < other.key
+        writeBuffer = []
         self.nextIndex.value = 0  # type: int
         running = True
         while running:
             running = False
             for p in self.pool + [self]: #type: WorkerProcess
-                if p.recordsOutR.eof:
+                if p.checkEOF():
                     continue
                 running = True
-                if not p.recordsOutR.poll():
+                if not p.pollRecord():
                     continue
-                result = (p.orderPipeR.recv(), p.recordsOutR.read())
-                if result[0] == self.nextIndex.value:
+                result = p.receiveOrderedRecord()
+                if self.ordered != 'c' and result[0] == self.nextIndex.value:
                     self.nextIndex.value += 1
                     outFile.write(result[1])
                 else:
-                    writeBuffer.add(result)
+                    if self.ordered == 'c' and self.nextIndex.value < result[0]:
+                        self.nextIndex.value = result[0]
+                    heapq.heappush(writeBuffer, HeapNode(result[0], result))
                     self.bufferedCount.value += 1
-                while len(writeBuffer) and writeBuffer[0][0] == self.nextIndex.value:
-                    result = writeBuffer.pop(0)
+                while len(writeBuffer) and (writeBuffer[0].key + self.maxTLen < self.nextIndex.value) if self.ordered == 'c' else (writeBuffer[0].key == self.nextIndex.value):
+                    result = heapq.heappop(writeBuffer)
                     self.bufferedCount.value -= 1
-                    self.nextIndex.value += 1
-                    outFile.write(result[1])
+                    if self.ordered != 'c': self.nextIndex.value += 1
+                    outFile.write(result.value[1])
 
     def write(self, outFile):
         running = True
         while running:
             running = False
             for p in self.pool + [self]: #type: WorkerProcess
-                if p.recordsOutR.eof:
+                if p.checkEOF():
                     continue
                 running = True
-                if not p.recordsOutR.poll():
+                if not p.pollRecord():
                     continue
-                self.nextIndex.value = p.orderPipeR.recv()
-                outFile.write(p.recordsOutR.read())
+                record, self.nextIndex.value = p.receiveOrderedRecord()
+                outFile.write(record)
 
 def status(mateCount, bufferedCount, nextIndex):
     import time
     lastIndex = nextIndex.value
     while True:
-        status = "\rMates buffered: {:>10}\tPending output: {:>10}\tRecords per second: ~{:>10}\tWaiting for read number: {:>10}\t".format(mateCount.value, bufferedCount.value, nextIndex.value - lastIndex, nextIndex.value)
+        status = "\x1b[2K\rMates buffered: {:>10}\tPending output: {:>10}\tRecords per second: ~{:>10}\tWaiting for read number: {:>10}".format(mateCount.value, bufferedCount.value, nextIndex.value - lastIndex, nextIndex.value)
         stderr.write(status)
         lastIndex = nextIndex.value
         time.sleep(1)
 
-def clip(inStream, outStream, threads, maxTLen, outFormat, ordered, verbose):
+def clip(inStream, outStream, threads = 8, maxTLen=1000, outFormat='bu', ordered=False, alternate=False, verbose=False):
     pool = []
     mateBuffer = {}
     inFile = pysam.AlignmentFile(inStream)
@@ -320,9 +304,12 @@ def clip(inStream, outStream, threads, maxTLen, outFormat, ordered, verbose):
 
     # Begin processing
     for _ in range(threads):
-        pool.append(WorkerProcess(inFile.header))
+        worker = WorkerProcess(alternate)
+        worker.start(inFile.header)
+        pool.append(worker)
 
-    writer = WriterProcess(outStream, outFormat, pool, inFile.header, ordered)
+    writer = WriterProcess(outStream, outFormat, pool, 'c' if alternate and ordered else ordered, maxTLen)
+    writer.start(inFile.header)
 
     def poolLooper():
         while True:
@@ -349,29 +336,30 @@ def clip(inStream, outStream, threads, maxTLen, outFormat, ordered, verbose):
                 del mateBuffer[record.query_name]
                 mateCount.value -= 1
         else:
-            writer.sendUnpaired(i, record)
+            writer.sendOrderedRecord(i, record)
         i += 1
     inFile.close()
 
     for _, record in mateBuffer.items():
         mateCount.value -= 1
-        writer.sendUnpaired(*record)
+        writer.sendOrderedRecord(*record)
     writer.stop()
     if verbose:
         statusProc.terminate()
 
 if __name__ == '__main__':
-    import getopt
+    import getopt, os, errno
     from sys import stdout, stdin, stderr, argv
     threads = 2
     maxTLen = 1000
     outFormat = 'w'
     ordered = False
+    alternate = False
     verbose = False
 
     #Command line options
     stderr.write("Clip Overlap v1.0\n")
-    ops, paths = getopt.gnu_getopt(argv[1:], 't:m:ho:sv')
+    ops, paths = getopt.gnu_getopt(argv[1:], 't:m:ho:sva')
     if not len(ops) and not len(paths):
         stderr.write("Use -h for help.\n")
     else:
@@ -382,6 +370,7 @@ if __name__ == '__main__':
                              "If no paths are given stdin and stdout are used.\n"
                              "-t # Threads to use for processing (Default=1)\n"
                              "-m # Maximum template length guaranteeing no read overlap (Default=1000)\n"
+                             "-a Alternate strand being clipped to avoid strand bias (RAM intensive)\n"
                              "-o [sbuc] Output format: s=SAM (Default), b=BAM compressed, bu=BAM uncompressed, c=CRAM\n"
                              "-s Maintain input order (High depth regions may fill RAM), if not set will output in arbitrary order (Minimal RAM)\n"
                              "-v Verbose status output\n")
@@ -390,6 +379,8 @@ if __name__ == '__main__':
                 threads = int(val or 1)
             elif op == '-m':
                 maxTLen = int(val or 1000)
+            elif op == '-a':
+                alternate = True
             elif op == '-o' and val != 's':
                 outFormat += val
             elif op == '-s':
@@ -397,4 +388,11 @@ if __name__ == '__main__':
             elif op == '-v':
                 verbose = True
 
-    clip(paths[0] if len(paths) else stdin, open(paths[1], 'wb+') if len(paths) > 1 else stdout, threads, maxTLen, outFormat, ordered, verbose)
+    if len(paths) > 1 and not os.path.exists(os.path.dirname(paths[1])):
+        try:
+            os.makedirs(os.path.dirname(paths[1]))
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+
+    clip(paths[0] if len(paths) else stdin, open(paths[1], 'wb+') if len(paths) > 1 else stdout, threads, maxTLen, outFormat, ordered, alternate, verbose)
