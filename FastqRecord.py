@@ -7,14 +7,16 @@ class FastqRecord(object):
     name, desc1, seq, desc2, qual = "","","","",""
     
     def read(self, stream:io.IOBase, SAMify:bool = True) -> bool:
-        line1 = stream.readline().decode('ascii')
-        if line1 is None: return False
+        line1 = ' '
+        while line1.isspace():
+            line1 = stream.readline().decode('ascii') # Ignore white space
+        if line1 == '': return False
         line2 = stream.readline().decode('ascii')
-        if line2 is None: return False
+        if line2 == '': return False
         line3 = stream.readline().decode('ascii')
-        if line3 is None: return False
+        if line3 == '': return False
         line4 = stream.readline().decode('ascii')
-        if line4 is None: return False
+        if line4 == '': return False
 
         # Generate index for record data
         nameEnd = line1.find(' ')
@@ -51,7 +53,7 @@ class FastqRecord(object):
         self.qual = self.qual[left:-right]
 
     def write(self, stream: io.IOBase):
-        stream.writelines(['@', self.name, ' ' + self.desc1 if self.desc1 != '' else '', '\n',
-                          self.seq, '\n',
-                           '+ ' + self.desc2 if self.desc2 != '' else '+', '\n',
-                           self.qual, '\n'])
+        stream.writelines([b'@', self.name.encode('ascii'), b' ' + self.desc1.encode('ascii') if self.desc1 != '' else '', b'\n',
+                          self.seq.encode('ascii'), b'\n',
+                           b'+ ' + self.desc2.encode('ascii') if self.desc2 != '' else b'+', b'\n',
+                           self.qual.encode('ascii'), b'\n'])
