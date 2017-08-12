@@ -29,12 +29,15 @@ class FamilyRecord:
         def inSeq(self) -> bool:  # Returns true if the operation has a sequence coordinate
             return self.op in (pysam.CMATCH, pysam.CINS, pysam.CSOFT_CLIP, pysam.CEQUAL, pysam.CDIFF)
 
-    __slots__ = 'name', 'pos', 'maxMapQ', 'cols'
-    def __init__(self, name: str, pos: int):
+    __slots__ = 'name', 'pos', 'maxMapQ', 'cols', 'size'
+    def __init__(self, name: str, pos: int, record: pysam.AlignedSegment = None):
         self.name = name
         self.pos = pos
         self.cols = []
         self.maxMapQ = 0
+        self.size = 0
+        if record:
+            self.aggregate(record)
 
     def getOpsAt(self, pos: int):
         def OPitr():
@@ -62,6 +65,7 @@ class FamilyRecord:
             else:
                 self.cols[i][(recordItr.op, recordItr.seqBase)] += recordItr.baseQual or 0
             i += 1
+        self.size += 1
 
     def __iadd__(self, other):
         if self.maxMapQ < other.maxMapQ:
@@ -77,6 +81,14 @@ class FamilyRecord:
         while pos < len(other.ops):
             self.cols.append(other.ops[pos])
             pos += 1
+
+    def __len__(self):
+        return self.size
+
+    @property
+    def is_positive_strand(self) -> bool:
+
+        pass #TODO
 
     def toPysam(self) -> pysam.AlignedSegment:
         seq = ""
