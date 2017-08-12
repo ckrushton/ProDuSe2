@@ -53,18 +53,23 @@ def ValidatedType(name: str, tp: typing.Type[_T], validator) -> typing.Type[_T]:
 
 PathOrNone = ValidatedType('PathOrNone', str, lambda x: not x or os.path.isfile(x))
 Path = ValidatedType('Path', str, os.path.isfile)
-
-
 UnsignedInt = ValidatedType('UnsignedInt', int, lambda x: x >= 0)
 
-def Domain(min, max):
+def Domain(min, max) -> type:
+    """
+    Create a Type restricted to the specified domain
+    :param min: The lower bound of the domain
+    :param max: The upper bound of the domain
+    :return: A ValidatedType representing the specified domain
+    """
     return ValidatedType('Domain_{}-{}'.format(min, max), int, lambda x: min <= x <= max)
 
-def which(program):
+def which(program: str):
     """
-    https://stackoverflow.com/a/377028
-    :param program:
-    :return:
+    Locates the true path to the executable in the environment
+    Borrowed from https://stackoverflow.com/a/377028
+    :param program: The program to determine a path to
+    :return: The fully qualified path to the executable or None if not found
     """
     import os
     def is_exe(fpath):
