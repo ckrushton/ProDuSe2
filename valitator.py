@@ -76,13 +76,16 @@ def which(program: str):
         return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
 
     fpath, fname = os.path.split(program)
+    tmp = fname.split(' ')
+    if len(tmp) > 1: #Handle path containing arguments
+        fname = tmp[0]
     if fpath:
-        if is_exe(program):
+        if is_exe(os.path.join(fpath, fname)):
             return program
     else:
         for path in os.environ["PATH"].split(os.pathsep):
             path = path.strip('"')
-            exe_file = os.path.join(path, program)
+            exe_file = os.path.join(path, fpath, fname)
             if is_exe(exe_file):
                 return exe_file
 
