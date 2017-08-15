@@ -1,9 +1,9 @@
-import re
-import os
+import re, os, pickle, sys
 from getopt import gnu_getopt
 from asciimatics.screen import Screen, StopApplication, NextScene
 from asciimatics.scene import Scene
 import asciimatics.widgets as Widgets
+from asciimatics.event import KeyboardEvent
 from inspect import signature, getdoc, Parameter
 from distutils.util import strtobool
 
@@ -15,7 +15,8 @@ from ruamel.yaml.comments import CommentedMap
 import jmespath
 
 YAMLLoader = ruamel.yaml.SafeLoader
-Widgets.Frame.palette['edit_text'] = (7,2,7)
+Widgets.Frame.palette['edit_text'] = (Screen.COLOUR_BLACK, Screen.A_NORMAL, Screen.COLOUR_CYAN)
+Widgets.Frame.palette['section_header'] = (Screen.COLOUR_GREEN, Screen.A_UNDERLINE, Screen.COLOUR_BLUE)
 
 funcDocRegex = re.compile(r'^[^:]+?(?=[\s]*:[\w]+)')
 argDocRegEx = re.compile(r':param ([^:]+):[\t ]*(.+)$', flags=re.MULTILINE)
@@ -59,28 +60,36 @@ def map(func, yaml_node, path = None) -> dict:
     return args
 
 def ConfigMap(*args, **kwargs):
-    def wrap(f):
-        sig = signature(f)
-        if not hasattr(f, '__cfgMap__'):
-            f.__cfgMap__ = {param:jmespath.compile(param) for param in sig.parameters}
-        for arg, expression in normaliseArgs(f, args, kwargs).items():
-            if arg == '_func' or not expression:
-                f.__cfgMap__[arg] = expression
-            else:
-                f.__cfgMap__[arg] = jmespath.compile(expression)
-        return f
+    def wrap(func):
+        sig = signature(func)
+        nArgs = normaliseArgs(func, args, kwargs)
+        if not hasattr(func, '__cfgMap__'):
+            func.__cfgMap__ = {}
+        if '_func' in nArgs:
+            func.__cfgMap__['_func'] = jmespath.compile(nArgs['_func'])
+        for param in sig.parameters:
+            if param in nArgs:
+                expression = nArgs.get(param)
+                func.__cfgMap__[param] = jmespath.compile(expression) if expression else None
+            elif param not in func.__cfgMap__:
+                func.__cfgMap__[param] = jmespath.compile(param)
+
+        return func
     return wrap
 
 def configUnmapped(func, param: str):
     return hasattr(func, '__cfgMap__') and param in func.__cfgMap__ and func.__cfgMap__[param] is None
 
-def boolParam(param: Parameter, desc: str, layout: Widgets.Layout):
+def boolParam(param: Parameter, desc: str, layout: Widgets.Layout, maxWidth = None):
     layout.add_widget(Widgets.CheckBox(desc, param.name, param.name))
 
-def textParam(param: Parameter, desc: str, layout: Widgets.Layout):
+def textParam(param: Parameter, desc: str, layout: Widgets.Layout, maxWidth = None):
     layout.add_widget(Widgets.Text(name=param.name, label=param.name))
     if desc:
-        layout.add_widget(Widgets.Label(desc))
+        lastI = 0
+        for i in range(maxWidth or len(desc), len(desc), maxWidth or len(desc)):
+            layout.add_widget(Widgets.Label(desc[lastI:i]))
+            lastI = i
         layout.add_widget(Widgets.Divider(False))
 
 widgetMap = {
@@ -91,36 +100,73 @@ widgetMap = {
     bool: boolParam
 }
 
-def configUI(screen, functions: list, yaml_node, title=''):
+def configUI(screen, functions: list, yaml_node, call_name, title=''):
+    windowWidth = screen.width * 2 // 3
+    data = {}
+    historyPath = os.path.expanduser('~/.configutator_history')
+    if os.path.exists(historyPath):
+        with open(historyPath, 'rb') as file:
+            history = pickle.load(file)
+            if call_name in history:
+                data = history[call_name]
+    window = Widgets.Frame(screen, screen.height * 2 // 3, windowWidth, title=title, data=data)
+    scene = Scene([window])
+
+    def saveHistory():
+        history = {}
+        if os.path.exists(historyPath):
+            with open(historyPath, 'rb') as file:
+                history = pickle.load(file)
+        history[call_name] = window.data
+        with open(historyPath, 'wb+') as file:
+            pickle.dump(history, file)
+
     def _go():
+        window.save()
+        saveHistory()
+        raise StopApplication('')
+    def _close():
+        window.save()
+        saveHistory()
         raise StopApplication('')
     def _save():
         pass
     def _load():
         pass
-    window = Widgets.Frame(screen, screen.height * 2 // 3, screen.width * 2 // 3, title=title)
-    scene = Scene([window])
+    def inputHandler(event):
+        if isinstance(event, KeyboardEvent):
+            c = event.key_code
+            # Stop on ctrl+q or ctrl+x or esc
+            if c in (17, 24, 27):
+                _close()
 
     for f in functions:
         doc = getParamDoc(f)
-        layout = Widgets.Layout([1], True)
+        layout = Widgets.Layout([1])
         window.add_layout(layout)
         sig = signature(f)
+        if len(functions) > 1:
+            label = Widgets.Label(f.__name__+':')
+            label.custom_colour = 'section_header'
+            layout.add_widget(label)
         for name, param in sig.parameters.items(): #type: str, Parameter
             if param.annotation in widgetMap:
-                widgetMap[param.annotation](param, doc.get(name, ''), layout)
+                widgetMap[param.annotation](param, doc.get(name, ''), layout, windowWidth)
+        layout.add_widget(Widgets.Divider(False))
 
-    toolbar = Widgets.Layout([1,1,1])
+    toolbar = Widgets.Layout([1,1,1,1])
     window.add_layout(toolbar)
     load_button = Widgets.Button('Load', _load)
     save_button = Widgets.Button('Save', _save)
+    cancel_button = Widgets.Button('Cancel', _close)
     go_button = Widgets.Button('GO', _go)
     toolbar.add_widget(load_button, 0)
     toolbar.add_widget(save_button, 1)
-    toolbar.add_widget(go_button, 2)
+    toolbar.add_widget(cancel_button, 2)
+    toolbar.add_widget(go_button, 3)
 
     window.fix()
-    screen.play([scene])
+    screen.play([scene], unhandled_input=inputHandler)
 
 def mapArgs(optList, functions) -> (dict, dict):
     overrides = {}
@@ -141,7 +187,14 @@ def mapArgs(optList, functions) -> (dict, dict):
                     overrides[f][name] = val
     return overrides
 
-def loadConfig(args: list, functions: tuple, configParam='config', defaultConfig=None, title='') -> (dict, list):
+def loadConfig(args: list, functions: tuple, title='', configParam='config', defaultConfig=None, configExpression = None, paramExpression = None, batchExpression=None) -> (dict, list):
+    if isinstance(configExpression, str):
+        configExpression = jmespath.compile(configExpression)
+    if isinstance(paramExpression, str):
+        paramExpression = jmespath.compile(paramExpression)
+    if isinstance(batchExpression, str):
+        batchExpression = jmespath.compile(batchExpression)
+
     call_name = args[0]
     args = args[1:]
     options = [configParam + '=', '{}:params:='.format(configParam), '{}:batch:='.format(configParam)]
@@ -182,9 +235,6 @@ def loadConfig(args: list, functions: tuple, configParam='config', defaultConfig
         if opt == '--' + configParam:
             if not (os.path.isfile(val) and os.access(val, os.R_OK)):
                 raise FileNotFoundError("The passed config path was not found: {}".format(val))
-            configExpression = None
-            paramExpression = None
-            batchExpression = None
             for o, v in optList:
                 if o == '--{}:'.format(configParam):
                     configExpression = jmespath.compile(v)
@@ -195,15 +245,22 @@ def loadConfig(args: list, functions: tuple, configParam='config', defaultConfig
             overrides = mapArgs(optList, functions)
             cfgs = ruamel.yaml.load_all(open(val), YAMLLoader)
             for cfg in cfgs:
-                if configExpression: cfg = configExpression.search(cfg)
+                if configExpression:
+                    tmp = configExpression.search(cfg)
+                    if tmp != None:
+                        cfg = tmp
                 if batchExpression:
                     jobs = batchExpression.search(cfg)
+                    if jobs == None:
+                        jobs = [cfg]
                 else:
                     jobs = [cfg]
                 for job in jobs:
                     if paramExpression:
                         params = originalParams.copy()
-                        params += paramExpression.search(job)
+                        tmp = paramExpression.search(job)
+                        if tmp is list:
+                            params += tmp
                     argMap = {}
                     for f in functions:
                         mapping = map(f, job)
@@ -218,11 +275,11 @@ def loadConfig(args: list, functions: tuple, configParam='config', defaultConfig
 
     if len(args):
         # If parameters were passed, skip TUI
-        yield mapArgs(optList, functions)
+        yield mapArgs(optList, functions), params
         return
     else:
         # No parameters were passed, load TUI
         cfg = None
         if defaultConfig is not None:
             cfg = ruamel.yaml.load(defaultConfig, YAMLLoader)
-        Screen.wrapper(configUI, arguments=(functions, cfg, title))
+        Screen.wrapper(configUI, arguments=(functions, cfg, call_name, title))
