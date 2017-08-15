@@ -227,7 +227,7 @@ class WriterProcess(parapysam.OrderedWorker):
         self.maxTLen = maxTLen
 
     def work(self):
-        outFile = pysam.AlignmentFile(self.outFH, self.outFormat, header=self.header)
+        outFile = pysam.AlignmentFile(self.outFH, 'w' + self.outFormat, header=self.header)
         if self.ordered:
             self.writeOrdered(outFile)
         else:
@@ -284,7 +284,7 @@ class WriterProcess(parapysam.OrderedWorker):
                 running = True
                 if not p.pollRecord():
                     continue
-                record, self.nextIndex.value = p.receiveOrderedRecord()
+                self.nextIndex.value, record = p.receiveOrderedRecord()
                 outFile.write(record)
 
 def status(mateCount, bufferedCount, nextIndex):
@@ -352,7 +352,7 @@ if __name__ == '__main__':
     from sys import stdout, stdin, stderr, argv
     threads = 2
     maxTLen = 1000
-    outFormat = 'w'
+    outFormat = ''
     ordered = False
     alternate = False
     verbose = False
