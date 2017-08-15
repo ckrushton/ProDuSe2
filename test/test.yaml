@@ -1,7 +1,8 @@
 default: &default
   output: /home/ncm3/data/Ly17/
   reference: /home/ncm3/data/GRCh38_no_alt.fa #/morinlab/reference/igenomes/Homo_sapiens/GSC/GRCh38/Sequence/WholeGenomeFasta/GRCh38_no_alt.fa
-  bwa: bwa mem -t10
+  bwa: bwa mem -t 10
+  samtools: samtools
 
   trim: &trim_default
     barcode_distance: 3
