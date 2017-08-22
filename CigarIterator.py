@@ -103,6 +103,8 @@ class CigarIterator(object):
         return self.valid
 
     def skipClipped(self, hardOnly: bool = False) -> int:
+        if self.opPos < 0:
+            self.opPos = 0
         if not self.valid: return 0
         count = 0
         if hardOnly:
@@ -110,7 +112,7 @@ class CigarIterator(object):
                 return self.stepOp()
             else:
                 return 0
-        while self.clipped:
+        while self.valid and self.clipped:
             count += self.stepOp()
         return count
 
