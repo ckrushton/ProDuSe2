@@ -8,7 +8,7 @@ default: &default
     barcode_distance: 3
 
   collapse: &collapse_default
-    barcode_mask: "000SSS0001111110"
+    barcode_mask: "SSS1111111111110"
     barcode_distance: 3
 
   filter: &filter_default
