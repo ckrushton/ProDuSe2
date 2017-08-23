@@ -1,10 +1,11 @@
 import io
 
 class FastqRecord(object):
-    "Parses an input stream containing well formed fastq records"
-
-    # Name Description1 Sequence Description2 Quality
-    name, desc1, seq, desc2, qual = "","","","",""
+    """Parses an input stream containing well formed fastq records"""
+    __slots__ = 'name', 'desc1', 'seq', 'desc2', 'qual'
+    def __init__(self):
+        # Name Description1 Sequence Description2 Quality
+        self.name, self.desc1, self.seq, self.desc2, self.qual = "","","","",""
     
     def read(self, stream:io.IOBase, SAMify:bool = True) -> bool:
         line1 = ' '
