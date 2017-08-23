@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import io
+from sys import stderr
 import FastqRecord
-from configutator import ConfigMap
+from configutator import ConfigMap, ArgMap
 
 IUPACCodeDict = {
     'A' : ['A'],    #Adenine
@@ -27,11 +28,13 @@ IUPACCodeDict = {
 def IUPACMatch(code1: str, code2: str) -> bool:
     return code2 in IUPACCodeDict[code1]
 
-@ConfigMap(inStream=None, outStream=None)
-def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barcode_sequence: str, reverse: bool = False, verbose: bool = False) -> (int, int):
+@ConfigMap(inStream=None, outStream=None, logStream=None)
+@ArgMap(inStream=None, outStream=None, logStream=None)
+def trim(inStream1: io.IOBase, inStream2: io.IOBase, outStream: io.IOBase, barcode_distance: int, barcode_sequence: str, reverse: bool = False, verbose: bool = False, logStream: io.IOBase=stderr) -> (int, int):
     """
     Trims barcodes
-    :param inStream: A file or stream handle to read input data
+    :param inStream1: A file or stream handle to read input data
+    :param inStream2: A file or stream handle to read mate input data
     :param outStream: A file or stream handle to output data
     :param barcode_distance: The maximum number of differences from the barcode sequence before the read is rejected. Set to negative to output rejected reads only.
     :param barcode_sequence: The IUPAC barcode sequence to match against.
@@ -39,35 +42,45 @@ def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barco
     :param verbose: Provide verbose output while processing
     :return:
     """
-    record = FastqRecord.FastqRecord()
+    if verbose:
+        logStream.write("\n") # This will be deleted by the next write
+    record1 = FastqRecord.FastqRecord()
+    record2 = FastqRecord.FastqRecord()
     invert = False
     count = 0
     discard = 0
     if barcode_distance < 0:
         invert = True
         barcode_distance *= -1
-    while record.read(inStream):
+    while record1.read(inStream1) and record2.read(inStream2):
         if verbose:
-            stderr.write("\x1b[2K\r{file}\tWorking on record: {record}\tRecords processed: {total}".format(file=outStream.name if hasattr(outStream, 'name') else 'Streaming', record=record.name, total=count))
-        mismatch = 0
+            logStream.write("\x1b[F\x1b[2K\r{file}\tWorking on record: {record}\tRecords processed: {total}\n".format(file=inStream1.name if hasattr(inStream1, 'name') else 'Streaming', record=record1.name, total=count))
         count += 1
         # Store barcode in sequence description
-        record.desc1 += '\tBC:Z:' + (record.seq[-len(barcode_sequence):] if reverse else record.seq[:len(barcode_sequence)])
-        mismatch += sum(not IUPACMatch(bc, sq) for bc, sq in zip(barcode_sequence, reversed(record.seq) if reverse else record.seq))
-        if len(record.seq) < len(barcode_sequence):
-            mismatch += len(barcode_sequence) - len(record.seq)
-        if invert != (mismatch > barcode_distance): #XOR
-            discard += 1
-            # Keep empty record to make BWA happy about having read mate
-            record.seq = ''
-            record.qual = ''
-        record.write(outStream)
+        barcode1 = (record1.seq[-len(barcode_sequence):] if reverse else record1.seq[:len(barcode_sequence)])
+        barcode2 = (record2.seq[-len(barcode_sequence):] if reverse else record2.seq[:len(barcode_sequence)])
+        record1.desc1 += '\tBC:Z:' + barcode1 + barcode2
+        record2.desc1 += '\tBC:Z:' + barcode2 + barcode1
+        for record, barcode in ((record1, barcode1), (record2, barcode2)):
+            mismatch = 0
+            mismatch += sum(not IUPACMatch(bc, sq) for bc, sq in zip(barcode_sequence, reversed(barcode) if reverse else barcode))
+            if len(barcode) < len(barcode_sequence):
+                mismatch += len(barcode_sequence) - len(barcode)
+            if invert != (mismatch > barcode_distance): #XOR
+                discard += 1
+                # Keep empty record to make BWA happy about having read mate
+                record.seq = ''
+                record.qual = ''
+            else:
+                record.trim(0 if reverse else len(barcode_sequence), len(barcode_sequence) if reverse else 0)
+            record.write(outStream)
     if verbose:
-        stderr.write("\x1b[2K\r{file}\tTotal records: {total}\tRecords discarded: {discard}\n".format(file=outStream.name if hasattr(outStream, 'name') else 'Streaming', total=count, discard=discard))
+        logStream.write("\x1b[F\x1b[2K\r{file}\tTotal records: {total}\tRecords discarded: {discard}\n".format(file=inStream1.name if hasattr(inStream1, 'name') else 'Streaming', total=count, discard=discard))
+    outStream.close()
     return discard, count
 
 if __name__ == "__main__":
-    from sys import stdout, stdin, stderr, argv
+    from sys import stdout, stdin, argv
     import gzip, os, errno
     from configutator import loadConfig
     for argmap, paths in loadConfig(argv, (trim,), title="Trim V1.0"):
