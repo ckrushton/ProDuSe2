@@ -1,12 +1,11 @@
 import pysam
-import sortedcontainers
 import math
 
 from CigarIterator import CigarIterator, appendOrInc
 
 class FamilyRecord:
     class Op:
-        __slots__ = 'op', 'allele', 'qSum', 'count'
+        __slots__ = 'op', 'allele', 'qSum', 'maxQ', 'count'
         def __init__(self, op, allele):
             self.op = op
             self.allele = allele
@@ -19,6 +18,7 @@ class FamilyRecord:
                 self.maxQ = other
             self.qSum += other
             self.count += 1
+            return self
 
         def merge(self, op):
             if self.maxQ < op.maxQ:
@@ -29,13 +29,13 @@ class FamilyRecord:
         def inSeq(self) -> bool:  # Returns true if the operation has a sequence coordinate
             return self.op in (pysam.CMATCH, pysam.CINS, pysam.CSOFT_CLIP, pysam.CEQUAL, pysam.CDIFF)
 
-    __slots__ = 'name', 'pos', 'maxMapQ', 'cols', 'size'
+    __slots__ = 'name', 'pos', 'maxMapQ', 'cols', 'members'
     def __init__(self, name: str, pos: int, record: pysam.AlignedSegment = None):
         self.name = name
         self.pos = pos
         self.cols = []
         self.maxMapQ = 0
-        self.size = 0
+        self.members = []
         if record:
             self.aggregate(record)
 
@@ -53,42 +53,57 @@ class FamilyRecord:
     def aggregate(self, record: pysam.AlignedSegment):
         if self.maxMapQ < record.mapping_quality:
             self.maxMapQ = record.mapping_quality
-
+        try:
+            startPos = record.get_tag('OS')  # type: int
+        except KeyError:
+            startPos = record.reference_start
         recordItr = CigarIterator(record)
         recordItr.skipClipped()
-        i = 0
-        while recordItr.next():
-            if len(self.cols) < i:
+        i = startPos - record.reference_start
+        while recordItr.valid:
+            if len(self.cols) <= i:
                 op = self.Op(recordItr.op, recordItr.seqBase)
                 op += recordItr.baseQual or 0
-                self.cols.append(sortedcontainers.SortedListWithKey(key=lambda x: (x.op, x.allele), iterable=[op]))
+                pos = {}
+                pos[(op.op, op.allele)] = op
+                self.cols.append(pos)
             else:
-                self.cols[i][(recordItr.op, recordItr.seqBase)] += recordItr.baseQual or 0
+                op = self.cols[i].get((recordItr.op, recordItr.seqBase))
+                if op:
+                    op += recordItr.baseQual or 0
+                else:
+                    self.cols[i][(recordItr.op, recordItr.seqBase)] = self.Op(recordItr.op, recordItr.seqBase)
             i += 1
-        self.size += 1
+            recordItr.next()
+        self.members.append(record.query_name)
 
-    def __iadd__(self, other):
+    def __iadd__(self, other: 'FamilyRecord'):
         if self.maxMapQ < other.maxMapQ:
             self.maxMapQ = other.maxMapQ
         pos = 0
         # Merge in other.cols
-        while pos < len(self.cols) and pos < len(other.ops):
-            for k, op in other.ops[pos]:
-                self.cols[pos][k].merge(op)
+        while pos < len(self.cols) and pos < len(other.cols):
+            for k, op in other.cols[pos].items():
+                if k in self.cols[pos]:
+                    self.cols[pos][k].merge(op)
+                else:
+                    self.cols[pos][k] = op
             pos += 1
 
         # If other.cols is longer, extend self.cols
-        while pos < len(other.ops):
-            self.cols.append(other.ops[pos])
+        while pos < len(other.cols):
+            self.cols.append(other.cols[pos])
             pos += 1
+        self.members += other.members
+        return self
 
     def __len__(self):
-        return self.size
+        return len(self.members)
 
     @property
     def is_positive_strand(self) -> bool:
 
-        pass #TODO
+        return False #TODO
 
     def toPysam(self) -> pysam.AlignedSegment:
         seq = ""
@@ -96,30 +111,44 @@ class FamilyRecord:
         ops = []
         fQ = []
         fC = []
-        for col in self.cols:
-            bestOp = col[0]
+
+        # Compile sequence and added tags
+        # fQ:B:C Integer array containing Phred score of wrong base chosen during collapse
+        # fC:B:I Integer array containing pairs (simmilar to a CIGAR) of count and depth representing, from the start of the alignment, the depth of the family at a position
+        for col in self.cols: #dict
+            colOps = list(col.values())
+            bestOp = colOps[0]
             totalN = 0
             totalQ = 0
-            for op in col:
+            for op in colOps:
                 totalN += op.count
                 totalQ += op.qSum
                 if bestOp.qSum < op.qSum:
                     bestOp = op
             if bestOp.inSeq():
                 seq += bestOp.allele
-                qual += self.mapQ
+                qual.append(bestOp.maxQ)
                 appendOrInc(ops, [op.op, 1])
-                fQ += [int(round(-10*math.log10((totalQ - bestOp.qSum) * bestOp.count / (totalQ * totalN))))]
-                fC += [totalN]
+                if (totalQ - bestOp.qSum) > 0:
+                    fQ.append(int(round(-10*math.log10((totalQ - bestOp.qSum) * bestOp.count / (totalQ * totalN)))))
+                else:
+                    fQ.append(93) # Max Phred Score
+                fC.append(totalN)
+        tags = []
+        if fQ:
+            tags.append(('fQ', fQ))
+        if fC:
+            tags.append(('fC', fC))
+
+        # Copy into pysam record
         record = pysam.AlignedSegment()
-        record.query_name = self.name
+        record.query_name = self.pos + self.name
         record.reference_start = self.pos
         record.mapping_quality = self.maxMapQ
+        record.flag = 17
         record.cigartuples = ops
         record.query_sequence = seq
         record.query_qualities = qual
-        # Added tags
-        # fQ:B:C Integer array containing Phred score of wrong base chosen during collapse
-        # fC:B:I Integer array containing pairs (simmilar to a CIGAR) of count and depth representing, from the start of the alignment, the depth of the family at a position
-        record.set_tags([('fQ', fQ), ('fC', fC)])
+        if tags:
+            record.set_tags(tags)
         return record
