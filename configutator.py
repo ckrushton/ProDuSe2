@@ -1,11 +1,6 @@
 import re, os, pickle, sys
 from getopt import gnu_getopt
-from asciimatics.screen import Screen, StopApplication, NextScene
-from asciimatics.scene import Scene
-import asciimatics.widgets as Widgets
-from asciimatics.event import KeyboardEvent
 from inspect import signature, getdoc, Parameter
-from distutils.util import strtobool
 
 from tator import normaliseArgs
 from valitator import validate
@@ -14,19 +9,38 @@ import ruamel.yaml
 from ruamel.yaml.comments import CommentedMap
 import jmespath
 
+from asciimatics.screen import Screen, StopApplication, NextScene
+from asciimatics.scene import Scene
+import asciimatics.widgets as Widgets
+from asciimatics.event import KeyboardEvent
+
 YAMLLoader = ruamel.yaml.SafeLoader
-Widgets.Frame.palette['edit_text'] = (Screen.COLOUR_BLACK, Screen.A_NORMAL, Screen.COLOUR_CYAN)
-Widgets.Frame.palette['section_header'] = (Screen.COLOUR_GREEN, Screen.A_UNDERLINE, Screen.COLOUR_BLUE)
 
 funcDocRegex = re.compile(r'^[^:]+?(?=[\s]*:[\w]+)')
 argDocRegEx = re.compile(r':param ([^:]+):[\t ]*(.+)$', flags=re.MULTILINE)
-#cmdlineRegEx = re.compile(r' *(?:-+([^= \'\"]+)[= ]?)?(?:([\'\"])([^\2]+?)\2|([^- \"\']+))?')
-#
-#def parseArgs(argv):
-#    return [(match.group(1), match.group(3)+match.group(4)) for match in cmdlineRegEx.finditer("".join(argv))]
 
 def getParamDoc(func) -> dict:
     return {match.group(1): match.group(2) for match in argDocRegEx.finditer(getdoc(func) or "")}
+
+def getTrueAnnotationType(annotation):
+    return getattr(annotation, '__supertype__', annotation)
+
+def strtobool(val: str) -> bool:
+    """Convert a string representation of truth to true or false.
+
+    True values are 'y', 'yes', 't', 'true', 'on', and '1'.
+    False values are 'n', 'no', 'f', 'false', 'off', and '0'.
+    Raises ValueError if 'val' is anything else.
+
+    Taken from distutils.util and modified to return correct type.
+    """
+    val = val.lower()
+    if val in ('y', 'yes', 't', 'true', 'on', '1'):
+        return True
+    elif val in ('n', 'no', 'f', 'false', 'off', '0'):
+        return False
+    else:
+        raise ValueError("invalid truth value %r" % (val,))
 
 def generate(functions: list):
     config = {}
@@ -39,25 +53,7 @@ def generate(functions: list):
         config[func.__name__] = params
     return config
 
-def map(func, yaml_node, path = None) -> dict:
-    if path:
-        yaml_node = yaml_node.get(path, yaml_node)
-    elif hasattr(func, '__cfgMap__') and '_func' in func.__cfgMap__:
-        yaml_node = func.__cfgMap__['_func'].search(yaml_node)
-    args = {}
-    sig = signature(func)
-    for name, param in sig.parameters.items(): #type: str, Parameter
-        val = yaml_node.get(name, param.default)
-        if val != param.empty:
-            args[name] = val
-    if hasattr(func, '__cfgMap__'):
-        for arg, expression in func.__cfgMap__.items():
-            if arg != '_func' and expression:
-                val = expression.search(yaml_node)
-                if val is None:
-                    val = yaml_node.get(arg, None)
-                args[arg] = val
-    return args
+# -- Config file mapping --
 
 def ConfigMap(*args, **kwargs):
     def wrap(func):
@@ -77,8 +73,102 @@ def ConfigMap(*args, **kwargs):
         return func
     return wrap
 
+def mapConfig(func, yaml_node, path = None) -> dict:
+    if path:
+        yaml_node = yaml_node.get(path, yaml_node)
+    elif hasattr(func, '__cfgMap__') and '_func' in func.__cfgMap__:
+        yaml_node = func.__cfgMap__['_func'].search(yaml_node)
+    args = {}
+    sig = signature(func)
+    for name, param in sig.parameters.items(): #type: str, Parameter
+        if hasattr(func, '__cfgMap__') and name in func.__cfgMap__:
+            expression = func.__cfgMap__[name]
+            if expression:
+                val = expression.search(yaml_node)
+                if val is None:
+                    val = param.default
+                args[name] = val
+        else:
+            val = yaml_node.get(name, param.default)
+            if val != param.empty:
+                args[name] = val
+    return args
+
 def configUnmapped(func, param: str):
     return hasattr(func, '__cfgMap__') and param in func.__cfgMap__ and func.__cfgMap__[param] is None
+
+# -- Command line argument mapping --
+
+def ArgMap(*args, **kwargs):
+    def wrap(func):
+        sig = signature(func)
+        nArgs = normaliseArgs(func, args, kwargs)
+        if not hasattr(func, '__argMap__'):
+            func.__argMap__ = {}
+        if '_func' in nArgs:
+            func.__argMap__['_func'] = nArgs['_func']
+        for param in sig.parameters:
+            if param in nArgs:
+                func.__argMap__[param] = nArgs.get(param) or None
+            #elif param not in func.__argMap__:
+            #    func.__argMap__[param] = param
+
+        return func
+    return wrap
+
+def mapArgs(optList, functions) -> (dict, dict):
+    args = {}
+    for f in functions:
+        sig = signature(f)
+        # Handle _func in argMap
+        prefix = f.__name__ + ':'
+        if hasattr(f, '__argMap__') and '_func' in f.__argMap__ and f.__argMap__['_func'] is not None:
+            prefix = f.__argMap__['_func']
+            if prefix != '':
+                prefix += ':'
+        prefix = '--' + prefix
+        args[f] = {}
+        for name, param in sig.parameters.items():
+            argName = resolveArgName(f, name)
+            if not argName: continue
+            for opt, val in optList:
+                if opt == '--' + argName:
+                    if issubclass(getTrueAnnotationType(sig.parameters[name].annotation), bool):
+                        val = strtobool(val or 'True')
+                    elif sig.parameters[name].annotation is not Parameter.empty:
+                        val = getTrueAnnotationType(sig.parameters[name].annotation)(val)
+                    args[f][name] = val
+
+        # Handle config path overrides TODO: This should be moved out of this function
+        for opt, val in optList:
+            if opt == prefix:
+                ConfigMap(_func=jmespath.compile(val))(f)
+            elif opt == prefix + name + ':':
+                ConfigMap(**{name:jmespath.compile(val)})(f)
+    return args
+
+def resolveArgName(func, name):
+    # Prefix parameter with name if argMap unspecified
+    if hasattr(func, '__argMap__'):
+        if name in func.__argMap__:
+            if func.__argMap__[name]:
+                return func.__argMap__[name]
+            else:
+                return None
+        elif '_func' in func.__argMap__:
+            if func.__argMap__['_func'] is not None:
+                return func.__argMap__['_func'] + ':' + name
+            else:
+                return name
+        else:
+            return name
+    else:
+        return func.__name__ + ':' + name
+
+def argUnmapped(func, param: str):
+    return hasattr(func, '__argMap__') and param in func.__argMap__ and func.__argMap__[param] is None
+
+# -- TUI Builder --
 
 def boolParam(param: Parameter, desc: str, layout: Widgets.Layout, maxWidth = None):
     layout.add_widget(Widgets.CheckBox(desc, param.name, param.name))
@@ -95,12 +185,15 @@ def textParam(param: Parameter, desc: str, layout: Widgets.Layout, maxWidth = No
 widgetMap = {
     'Path': textParam,
     'PathOrNone': textParam,
-    str: textParam,
-    int: textParam,
-    bool: boolParam
+    'str': textParam,
+    'int': textParam,
+    'bool': boolParam
 }
 
 def configUI(screen, functions: list, yaml_node, call_name, title=''):
+    Widgets.Frame.palette['edit_text'] = (Screen.COLOUR_BLACK, Screen.A_NORMAL, Screen.COLOUR_CYAN)
+    Widgets.Frame.palette['section_header'] = (Screen.COLOUR_GREEN, Screen.A_UNDERLINE, Screen.COLOUR_BLUE)
+
     windowWidth = screen.width * 2 // 3
     data = {}
     historyPath = os.path.expanduser('~/.configutator_history')
@@ -150,8 +243,8 @@ def configUI(screen, functions: list, yaml_node, call_name, title=''):
             label.custom_colour = 'section_header'
             layout.add_widget(label)
         for name, param in sig.parameters.items(): #type: str, Parameter
-            if param.annotation in widgetMap:
-                widgetMap[param.annotation](param, doc.get(name, ''), layout, windowWidth)
+            if param.annotation.__name__ in widgetMap:
+                widgetMap[param.annotation.__name__](param, doc.get(name, ''), layout, windowWidth)
         layout.add_widget(Widgets.Divider(False))
 
     toolbar = Widgets.Layout([1,1,1,1])
@@ -168,24 +261,7 @@ def configUI(screen, functions: list, yaml_node, call_name, title=''):
     window.fix()
     screen.play([scene], unhandled_input=inputHandler)
 
-def mapArgs(optList, functions) -> (dict, dict):
-    overrides = {}
-    for f in functions:
-        sig = signature(f)
-        overrides[f] = {}
-        for opt, val in optList:
-            if opt == '--'+f.__name__+':':
-                ConfigMap(_func=val)(f)
-            else:
-                name = opt[len(f.__name__) + 3 if opt.startswith('--' + f.__name__ + ':') else 2:]
-                if name == 'config' or name.startswith('config:'): continue
-                if sig.parameters[name].annotation is bool: val = strtobool(val or 'True')
-                elif sig.parameters[name].annotation is not Parameter.empty: val = sig.parameters[name].annotation(val)
-                if opt[-1] == ':':
-                    ConfigMap(**{name:val})(f)
-                else:
-                    overrides[f][name] = val
-    return overrides
+# -- Loader --
 
 def loadConfig(args: list, functions: tuple, title='', configParam='config', defaultConfig=None, configExpression = None, paramExpression = None, batchExpression=None) -> (dict, list):
     if isinstance(configExpression, str):
@@ -197,13 +273,17 @@ def loadConfig(args: list, functions: tuple, title='', configParam='config', def
 
     call_name = args[0]
     args = args[1:]
-    options = [configParam + '=', '{}:params:='.format(configParam), '{}:batch:='.format(configParam)]
+    options = [configParam + '=', '{}:='.format(configParam), '{}:params:='.format(configParam), '{}:batch:='.format(configParam)]
     for f in functions:
+        # Build command line argument list from function parameters
         sig = signature(f)
-        if len(functions) == 1:
-            options += [name + ('' if param.annotation is bool and param.default == False else '=') for name, param in sig.parameters.items() if not configUnmapped(f, name)]
-        else:
-            options += [f.__name__ + ':' + param + '=' for param in sig.parameters if not configUnmapped(f, param)]
+        for name, param in sig.parameters.items():
+            name = resolveArgName(f, name)
+            if not name: continue
+            # If boolean, make parameter valueless
+            if not ((issubclass(getTrueAnnotationType(param.annotation), bool) or isinstance(param.default, bool)) and param.default == False):
+                name += '='
+            options.append(name)
     optList, originalParams = gnu_getopt(args, 'h', options)
     params = originalParams.copy()
 
@@ -213,6 +293,7 @@ def loadConfig(args: list, functions: tuple, title='', configParam='config', def
             from sys import stderr
             if title: stderr.write(title + '\n')
             for f in functions:
+                # Build command line argument option descriptions from function parameters
                 sig = signature(f)
                 if len(functions) > 1: stderr.write("{}:\n".format(f.__name__))
                 funcDocs = funcDocRegex.findall(getdoc(f))
@@ -220,13 +301,14 @@ def loadConfig(args: list, functions: tuple, title='', configParam='config', def
                     stderr.write(funcDocs[0] + '\n')
                 doc = getParamDoc(f)
                 for name, param in sig.parameters.items(): #type:str, Parameter
-                    if hasattr(f, '__cfgMap__') and f.__cfgMap__.get(name, None) is not None:
-                        argName = (f.__name__ + ':' if len(functions) > 1 else '') + name
-                        default = ''
-                        if param.default != param.empty:
-                            default = "[Default: {}]".format(param.default)
-                        stderr.write("  --{} - {} {}\n".format(argName, doc.get(name, ''), default))
-            stderr.write("  --{} - Path to configuration file. All other specified options override config. " 
+                    argName = resolveArgName(f, name)
+                    if not argName: continue
+                    default = ''
+                    if param.default != param.empty:
+                        default = "[Default: {}]".format(param.default)
+                    stderr.write("  --{} - {} {}\n".format(argName, doc.get(name, ''), default))
+
+            stderr.write("General:\n  --{} - Path to configuration file. All other specified options override config. " 
                          "If no config file specified, all options without default must be specified.\n".format(configParam))
             exit()
 
@@ -234,7 +316,7 @@ def loadConfig(args: list, functions: tuple, title='', configParam='config', def
     for opt, val in optList:
         if opt == '--' + configParam:
             if not (os.path.isfile(val) and os.access(val, os.R_OK)):
-                raise FileNotFoundError("The passed config path was not found: {}".format(val))
+                raise FileNotFoundError("The config path was not found: {}".format(val))
             for o, v in optList:
                 if o == '--{}:'.format(configParam):
                     configExpression = jmespath.compile(v)
@@ -259,17 +341,18 @@ def loadConfig(args: list, functions: tuple, title='', configParam='config', def
                     if paramExpression:
                         params = originalParams.copy()
                         tmp = paramExpression.search(job)
-                        if tmp is list:
+                        if isinstance(tmp, list):
                             params += tmp
                     argMap = {}
                     for f in functions:
-                        mapping = map(f, job)
+                        mapping = mapConfig(f, job)
                         argMap[f] = mapping
                         validate(f, mapping)
                     for f, m in overrides.items():
                         if f not in argMap:
                             argMap[f] = {}
                         argMap[f].update(m)
+                    #TODO os.fork() to parallelize jobs
                     yield argMap, params
             return
 
