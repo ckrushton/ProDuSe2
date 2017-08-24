@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
 import sys, os, tempfile, shutil, gzip, selectors, re
 
-from collapse import collapse
-from clip import clip
-from trim import trim, openGZ
+# If called directly, this works fine
+try:
+    from collapse import collapse
+    from clip import clip
+    from trim import trim
+    from configutator import ConfigMap, ArgMap, loadConfig
+    from valitator import Path, PathOrNone, Executable
+# If installed
+except ModuleNotFoundError:
+    from ProDuSe.collapse import collapse
+    from ProDuSe.clip import clip
+    from ProDuSe.trim import trim
+    from ProDuSe.configutator import ConfigMap, ArgMap, loadConfig
+    from ProDuSe.valitator import Path, PathOrNone, Executable
 
 from multiprocessing import Process
 from subprocess import Popen, PIPE
 
-from configutator import ConfigMap, ArgMap, loadConfig
-from valitator import Path, PathOrNone, Executable
 
 def pipeOpener(file, flags):
     return os.open(file, flags|os.O_RDONLY|os.O_NONBLOCK)
@@ -223,11 +232,13 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, output: str, bwa: Execu
     sort.wait()
     shutil.rmtree(temp_dir)
 
-if __name__ == "__main__":
+def main(args=None):
     ConfigMap(_func='trim', verbose=None, logStream=None)(trim)
     ConfigMap(_func='collapse', verbose=None, logStream=None)(collapse)
     ArgMap(_func=trim.__name__, verbose='verbose', logStream=None)(trim)
     ArgMap(_func=collapse.__name__, verbose='verbose', logStream=None)(collapse)
+    if args is None:
+        args = sys.argv
     cfgs = loadConfig(sys.argv, (ProDuSe, trim, collapse), batchExpression='samples')
     global config
     while True:
@@ -239,4 +250,7 @@ if __name__ == "__main__":
             continue
         except StopIteration:
             break
+
+if __name__ == "__main__":
+    main()
 

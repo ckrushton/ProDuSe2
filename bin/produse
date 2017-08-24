@@ -2,7 +2,7 @@
 
 import sys
 from ProDuSe.__version import __version__
-from ProDuSe import trim, clip, collapse, adapter_predict
+from ProDuSe import trim, clip, collapse, adapter_predict, produse
 
 
 def usage():
@@ -17,7 +17,7 @@ def usage():
 	sys.stdout.write("\n")
 	sys.stdout.write("Commands:\n")
 	sys.stdout.write("adapter_predict\tIdentifies the degerate barcode used in a set of FASTQ files\n")
-	sys.stdout.write("run_pipeline\tRuns all steps of the ProDuSe pipeline listed below\n")
+	sys.stdout.write("run_produse\tRuns all steps of the ProDuSe pipeline listed below\n")
 	sys.stdout.write("trim\t\tRemoves barcodes from FASTQ files\n")
 	sys.stdout.write("clip\t\tClips bases which overlap in both the forward and reverse reads in paired-end sequencing\n")
 	sys.stdout.write("collapse\tIdentifies duplicates,and merges duplicates into a consensus\n")
@@ -36,6 +36,8 @@ def main(args):
 
 	if command == "adapter_predict":
 		adapter_predict.main(argv=args[2:])
+	elif command == "run_produse":
+		produse.main(args[1:])
 	elif command == "trim":
 		trim.main(args[1:])
 	elif command == "collapse":
