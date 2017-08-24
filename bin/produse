@@ -35,7 +35,7 @@ def main(args):
 	command = args[1]
 
 	if command == "adapter_predict":
-		adapter_predict.main()
+		adapter_predict.main(argv=args[2:])
 	elif command == "trim":
 		trim.main(args[1:])
 	elif command == "collapse":

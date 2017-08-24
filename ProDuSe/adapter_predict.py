@@ -26,7 +26,7 @@ import sys
 Processes command line arguments
 """
 desc = "Estimates the adapter sequences used in paired (i.e. foward and reverse) fastq files"
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(description=desc, prog="adapter_predict")
 parser.add_argument(
     "-i", "--input",
     metavar="FASTQ",
@@ -42,10 +42,12 @@ parser.add_argument(
     )
 
 
-def main(args=None):
+def main(args=None, argv=None):
 
-    if args is None:
+    if args is None and argv is None:
         args = parser.parse_args()
+    elif args is None:
+        args = parser.parse_args(argv)
 
     # Check If Input is Gzip and call appropariate FastqOpen
     read = 'r'
