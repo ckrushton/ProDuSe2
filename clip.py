@@ -42,13 +42,12 @@ def calculateMappingQuality(record: pysam.AlignedSegment) -> int:
     return record.mapping_quality
 
 def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: int = 0, end: int = maxsize):
-    if start > end:
-        #No works needs to be done
+    if start <= record.reference_start and end >= record.reference_end-1:
+        # No work needs to be done
         return
+
     if start < record.reference_start:
         start = record.reference_start
-    #if end >= record.reference_end:
-    #    end = record.reference_end-1
     ops = []
 
     # Retain the first match after clipping to avoid setting the new start position to a deletion
@@ -63,7 +62,7 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
     hard = i.skipClipped(True)
     if hard: ops += [(pysam.CHARD_CLIP, hard)]
     #Skip to reference starting position
-    if start < end and i.skipToRefPos(start):
+    if start <= end and i.skipToRefPos(start):
         #Soft clip everything before start
         appendOrInc(ops, [pysam.CSOFT_CLIP, i.seqPos])
         dist = end - i.refPos #Calculate reference distance remaining to end
@@ -185,13 +184,13 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
     # TODO Store tag for which strand the base originated from
 
 class WorkerProcess(parapysam.OrderedWorker):
-    def __init__(self, alternate, clipOnly):
+    def __init__(self, alternate, clipOnly, trimTail):
         self.alternate = alternate
         self.clipOnly = clipOnly
+        self.trimTail = trimTail
         super().__init__()
 
     def work(self):
-        flipflop = False
         try:
             firstRecord = self.receiveRecord()
             secondRecord = self.receiveRecord()
@@ -202,15 +201,54 @@ class WorkerProcess(parapysam.OrderedWorker):
                 else:
                     rightRecord = firstRecord
                     leftRecord = secondRecord
-                # alternate clipped read to avoid strand bias
-                if self.alternate and flipflop:
-                    if not self.clipOnly: mergeRecord(rightRecord, leftRecord)
-                    trimRecord(rightRecord, leftRecord, leftRecord.reference_end-1)
-                    flipflop = False
+
+                if not self.clipOnly:
+                    if self.alternate:
+                        mergeRecord(rightRecord, leftRecord)
+                    else:
+                        mergeRecord(leftRecord, rightRecord)
+
+                """
+                trimTail:
+                    If leftRecord.is_reverse: tail is on the left
+                    else: tail is on the right
+                    If rightRecord.is_reverse: tail is on the left
+                    else: tail is on the right
+                    if both or neither reversed: skip trimming tail
+                    leftRecord:
+                        if tail on left: clip left of leftRecord to beginning of rightRecord
+                        if tail on right: clip right of leftRecord to end of rightRecord
+                    rightRecord:
+                        if tail on left: clip left of rightRecord to the beginning of leftRecord
+                        if tail on right: clip right of rightRecord to the end of leftRecord
+                clip:
+                    if alternate: clip left of rightRecord to end of leftRecord
+                    else: clip right of leftRecord to beginning of rightRecord
+                """
+                leftStart = 0
+                leftEnd = maxsize
+                rightStart = 0
+                rightEnd = maxsize
+
+                if self.trimTail and (leftRecord.is_reverse != rightRecord.is_reverse): # XOR
+                    if leftRecord.is_reverse:
+                        leftStart = rightRecord.reference_start
+                    else:
+                        leftEnd = rightRecord.reference_end -1
+
+                    if rightRecord.is_reverse:
+                        rightStart = leftRecord.reference_start
+                    else:
+                        rightEnd = leftRecord.reference_end -1
+
+                if self.alternate:
+                    rightStart = leftRecord.reference_end
                 else:
-                    if not self.clipOnly: mergeRecord(leftRecord, rightRecord)
-                    trimRecord(leftRecord, rightRecord, 0, rightRecord.reference_start)
-                    flipflop = True
+                    leftEnd = rightRecord.reference_start
+
+                trimRecord(leftRecord, rightRecord, leftStart, leftEnd)
+                trimRecord(rightRecord, leftRecord, rightStart, rightEnd)
+
                 self.sendRecord(firstRecord)
                 self.sendRecord(secondRecord)
                 firstRecord = self.receiveRecord()
@@ -253,6 +291,7 @@ class WriterProcess(parapysam.OrderedWorker):
                 return self.key < other.key
         writeBuffer = []
         self.nextIndex.value = 0  # type: int
+        largestPos = 0
         running = True
         while running:
             running = False
@@ -263,26 +302,31 @@ class WriterProcess(parapysam.OrderedWorker):
                 if not p.pollRecord():
                     continue
                 result = p.receiveOrderedRecord()
-                if self.ordered != 'c' and result[0] == self.nextIndex.value:
+                if self.nextIndex.value == result[0]:
                     self.nextIndex.value += 1
-                    outFile.write(result[1])
-                else:
+
+                if self.ordered == 'c':
                     try:
-                        startPos = result[1].get_tag('OS') #type: int
+                        startPos = result[1].get_tag('OS')  # type: int
                     except KeyError:
                         startPos = result[1].reference_start
-                    if self.ordered == 'c':
-                        if self.nextIndex.value < startPos:
-                            self.nextIndex.value = startPos
-                        heapq.heappush(writeBuffer, HeapNode(startPos, result))
-                    else:
-                        heapq.heappush(writeBuffer, HeapNode(result[0], result))
-                    self.bufferedCount.value += 1
-                while len(writeBuffer) and (writeBuffer[0].key + self.maxTLen < self.nextIndex.value) if self.ordered == 'c' else (writeBuffer[0].key == self.nextIndex.value):
+                    if largestPos < startPos:
+                        largestPos = startPos
+                    heapq.heappush(writeBuffer, HeapNode(result[1].reference_start, result))
+                else:
+                    heapq.heappush(writeBuffer, HeapNode(result[0], result))
+                self.bufferedCount.value += 1
+                while len(writeBuffer) and writeBuffer[0].key == self.nextIndex.value and (self.ordered != 'c' or writeBuffer[1].reference_start < largestPos):
                     result = heapq.heappop(writeBuffer)
                     self.bufferedCount.value -= 1
                     if self.ordered != 'c': self.nextIndex.value += 1
                     outFile.write(result.value[1])
+
+        while len(writeBuffer):
+            result = heapq.heappop(writeBuffer)
+            self.bufferedCount.value -= 1
+            if self.ordered != 'c': self.nextIndex.value += 1
+            outFile.write(result.value[1])
 
     def write(self, outFile):
         running = True
@@ -305,19 +349,25 @@ def status(mateCount, bufferedCount, nextIndex, logStream: io.IOBase = stderr):
         logStream.write(status)
         time.sleep(0.2)
 
-def clip(inStream: io.IOBase, outStream: io.IOBase, threads: int = 8, maxTLen: int = 1000, outFormat:str = 'bu', ordered=False, alternate=False, trimBarcode=False, clipOnly=False, verbose=False, logStream: io.IOBase=stderr):
+def clip(inStream: io.IOBase, outStream: io.IOBase, threads: int = 8, maxTLen: int = 1000, outFormat:str = 'bu', ordered=False, alternate=False, clipOnly=False, trimTail=False, verbose=False, logStream: io.IOBase=stderr):
     pool = []
     mateBuffer = {}
     inFile = pysam.AlignmentFile(inStream)
     inFileItr = inFile.fetch(until_eof=True)
 
+    # An even number of threads needs to be used to allow round robin loop to alternate consistently at its boundaries
+    if alternate:
+        threads -= threads % 2
+        if threads == 0:
+            threads = 2
+
     # Begin processing
-    for _ in range(threads):
-        worker = WorkerProcess(alternate, clipOnly)
+    for i in range(threads):
+        worker = WorkerProcess(alternate and bool(i % 2), clipOnly, trimTail)
         worker.start(inFile.header)
         pool.append(worker)
 
-    writer = WriterProcess(outStream, outFormat, pool, 'c' if alternate and ordered else ordered, maxTLen)
+    writer = WriterProcess(outStream, outFormat, pool, 'c' if (alternate or trimTail) and ordered else ordered, maxTLen)
     writer.start(inFile.header)
 
     def poolLooper():
@@ -366,13 +416,13 @@ if __name__ == '__main__':
     outFormat = ''
     ordered = False
     alternate = False
+    trimTail = False
     clipOnly = False
-    trimBarcode = False
     verbose = False
 
     #Command line options
     stderr.write("Clip Overlap v1.0\n")
-    ops, paths = getopt.gnu_getopt(argv[1:], 't:m:ho:sva')
+    ops, paths = getopt.gnu_getopt(argv[1:], 't:m:ho:svabc')
     if not len(ops) and not len(paths):
         stderr.write("Use -h for help.\n")
     else:
@@ -384,7 +434,7 @@ if __name__ == '__main__':
                              "-t # Threads to use for processing (Default=1)\n"
                              "-m # Maximum template length guaranteeing no read overlap (Default=1000)\n"
                              "-a Alternate strand being clipped to avoid strand bias (RAM intensive)\n"
-                             "-b Trim trailing barcode region using BC tag"
+                             "-b Trim tails of reads that extend past end of mate. Used to trim barcode remnants."
                              "-c Clip only, do not merge clipped region into mate\n"
                              "-o [sbuc] Output format: s=SAM (Default), b=BAM compressed, bu=BAM uncompressed, c=CRAM\n"
                              "-s Maintain input order (High depth regions may fill RAM), if not set will output in arbitrary order (Minimal RAM)\n"
@@ -396,10 +446,10 @@ if __name__ == '__main__':
                 maxTLen = int(val or 1000)
             elif op == '-a':
                 alternate = True
+            elif op == '-b':
+                trimTail = True
             elif op == '-c':
                 clipOnly = True
-            elif op == '-b':
-                trimBarcode = True
             elif op == '-o' and val != 's':
                 outFormat += val
             elif op == '-s':
@@ -414,4 +464,4 @@ if __name__ == '__main__':
             if e.errno != errno.EEXIST:
                 raise
 
-    clip(paths[0] if len(paths) else stdin, open(paths[1], 'wb+') if len(paths) > 1 else stdout, threads, maxTLen, outFormat, ordered, alternate, trimBarcode, verbose=verbose)
+    clip(paths[0] if len(paths) else stdin, open(paths[1], 'wb+') if len(paths) > 1 else stdout, threads, maxTLen, outFormat, ordered, alternate, clipOnly, trimTail, verbose)
