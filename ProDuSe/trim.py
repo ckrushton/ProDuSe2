@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
-import io, gzip
-from sys import stdin, stdout, stderr
-import FastqRecord
-from configutator import ConfigMap, ArgMap, PositionalArg, TransformCfg
+
+import io
+from sys import stderr
+
+# If running directly, this works fine
+try:
+    import FastqRecord
+    from configutator import ConfigMap, ArgMap, loadConfig
+# If installed
+except ModuleNotFoundError:
+    from ProDuSe import FastqRecord
+    from ProDuSe.configutator import ConfigMap, ArgMap, loadConfig
 
 IUPACCodeDict = {
     'A' : 'A',    #Adenine
@@ -124,7 +132,8 @@ def trim(barcode_distance: int, barcode_sequence: str, reverse: bool = False, in
     outStream.close()
     return discard, count
 
-if __name__ == "__main__":
+
+def main(args=None):
     from sys import stdout, stdin, argv
     import os, errno
     from configutator import loadConfig
@@ -138,4 +147,7 @@ if __name__ == "__main__":
             continue # TODO add verbose output
         except StopIteration:
             break
+
+if __name__ == "__main__":
+    main()
 

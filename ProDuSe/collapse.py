@@ -7,11 +7,17 @@ else:
 
 import sortedcontainers
 import networkx as nx
-from configutator import ConfigMap, ArgMap, PositionalArg, TransformCfg
+
 import io, itertools, collections
 from sys import stdout, stdin, stderr, argv, maxsize
 
-from FamilyRecord import FamilyRecord, appendOrInc
+# If running directly, this works fine
+try:
+    from FamilyRecord import FamilyRecord
+    from configutator import ConfigMap, ArgMap, loadConfig
+except ModuleNotFoundError:
+    from ProDuSe.FamilyRecord import FamilyRecord
+    from ProDuSe.configutator import ConfigMap, ArgMap, PositionalArg, TransformCfg
 
 strandThreshold = 0.4 # 40% percent tolerance of deviation for the strand identifier sequence
 strandMaskId = 'S'
@@ -345,10 +351,12 @@ def collapse(barcode_distance: int, barcode_mask: str, verbose: bool=False, inSt
     outFile.close()
     outStream.close()
 
-if __name__ == "__main__":
+def main(args=None):
     import os, errno
     from configutator import loadConfig
-    cfgs = loadConfig(argv, (collapse,), title="Collapse V1.0")
+    if args is None:
+        args = argv
+    cfgs = loadConfig(args, (collapse,), title="Collapse V1.0")
     while True: # Skip missing inputs
         try:
             argmap = next(cfgs)
@@ -357,3 +365,7 @@ if __name__ == "__main__":
             continue # TODO add verbose output
         except StopIteration:
             break
+
+if __name__ == "__main__":
+    main()
+
