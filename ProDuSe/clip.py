@@ -8,7 +8,6 @@ from sys import maxsize, stderr
 import multiprocessing, ctypes, io
 
 # If running as a script, this works fine
-
 try:
     from CigarIterator import CigarIterator, appendOrInc
     import parapysam
@@ -384,6 +383,8 @@ def main(args=None):
     #Command line options
     stderr.write("Clip v1.0\n")
     ops, paths = getopt.gnu_getopt(args, 't:m:ho:sva')
+    stderr.write("Clip v1.0\n")
+    ops, paths = getopt.gnu_getopt(args, 't:m:ho:sva')
     if not len(ops) and not len(paths):
         stderr.write("Waiting on stdin. Try -h for help. Use ctrl+c to cancel.\n")
 
@@ -426,7 +427,8 @@ def main(args=None):
             if e.errno != errno.EEXIST:
                 raise
 
-    clip(paths[0] if len(paths) else stdin, open(paths[1], 'wb+') if len(paths) > 1 else stdout, threads, maxTLen, outFormat, ordered, alternate, trimBarcode, verbose=verbose)
+    clip(paths[0] if len(paths) else stdin, open(paths[1], 'wb+') if len(paths) > 1 else stdout, threads, maxTLen, outFormat, ordered, alternate, clipOnly, trimTail, verbose)
 
 if __name__ == '__main__':
     main()
+
