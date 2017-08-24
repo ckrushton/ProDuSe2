@@ -7,7 +7,8 @@ else:
 from sys import maxsize, stderr
 import multiprocessing, ctypes, io
 
-# If running directly, this works fine
+# If running as a script, this works fine
+
 try:
     from CigarIterator import CigarIterator, appendOrInc
     import parapysam

@@ -2,6 +2,7 @@
 
 import sys
 from ProDuSe.__version import __version__
+
 from ProDuSe import trim, clip, collapse, adapter_predict, produse
 
 
@@ -43,7 +44,7 @@ def main(args):
 	elif command == "collapse":
 		collapse.main(args[1:])
 	elif command == "clip":
-		clip.main(args[2:])
+		clip.main(args[1:])
 	elif command == "call":
 		sys.stdout.write("Not yet finished")
 	else:
