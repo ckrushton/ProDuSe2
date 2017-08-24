@@ -159,7 +159,7 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, output: str, bwa: Execu
         os.set_inheritable(w, True)
         debugPipes.append(open(r, 'rb'))
     trimOut = open(trimOutPath, 'wb')
-    trimProc = Process(target=trim, args=(inFile1, inFile2, trimOut), kwargs=dict(**config[trim], logStream=open(w if verbose else os.devnull, 'w', buffering=1)))
+    trimProc = Process(target=trim, args=(inFile1, trimOut), kwargs=dict(mateStream=inFile2, **config[trim], logStream=open(w if verbose else os.devnull, 'w', buffering=1)))
     trimProc.start()
     trimOut.close()
 

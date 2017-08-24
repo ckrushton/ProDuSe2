@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+./trim.py --config:batch: "samples[].[merge({output: join(\`\`, [output, \`trimmed/\`, name, \`-1.fastq.gz\`]), input: fastqs[0]}, trim), merge({output: join(\`\`, [output, \`trimmed/\`, name, \`-2.fastq.gz\`]), input: fastqs[1]}, trim)] | []" --config:params: "[input, output]" "$@"
