@@ -41,7 +41,7 @@ def main(args):
 	elif command == "collapse":
 		collapse.main(args[1:])
 	elif command == "clip":
-		clip.main(args[1:])
+		clip.main(args[2:])
 	elif command == "call":
 		sys.stdout.write("Not yet finished")
 	else:
