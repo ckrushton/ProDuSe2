@@ -9,8 +9,8 @@ class FastqRecord(object):
     
     def read(self, stream:io.IOBase, SAMify:bool = True) -> bool:
         line1 = ' '
-        while line1.isspace():
-            line1 = stream.readline().decode('ascii') # Ignore white space
+        while line1.isspace():  # Ignore white space
+            line1 = stream.readline().decode('ascii')
         if line1 == '': return False
         line2 = stream.readline().decode('ascii')
         if line2 == '': return False
