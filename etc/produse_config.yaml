@@ -1,5 +1,6 @@
 default: &default
   output: ./
+  reference: Ref.fa
   bwa: bwa mem -t 10
   samtools: samtools
 
