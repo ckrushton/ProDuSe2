@@ -103,8 +103,8 @@ if __name__ == "__main__":
             inFile = stdin
         if len(paths) > 2:
             mateFile = open(paths[1], 'rb')
-            if inFile.peek(2)[:2] == b'\037\213':
-                inFile = gzip.open(inFile)
+            if mateFile.peek(2)[:2] == b'\037\213':
+                mateFile = gzip.open(mateFile)
         else:
             mateFile = None
         if len(paths) > 1:
