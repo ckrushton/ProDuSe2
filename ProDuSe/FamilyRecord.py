@@ -1,7 +1,11 @@
 import pysam
 import math
 
-from CigarIterator import CigarIterator, appendOrInc
+try:
+    from CigarIterator import CigarIterator, appendOrInc
+# If installed
+except ModuleNotFoundError:
+    from ProDuSe.CigarIterator import CigarIterator, appendOrInc
 
 class FamilyRecord:
     class Op:

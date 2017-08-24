@@ -7,11 +7,16 @@ else:
 
 import sortedcontainers
 import networkx as nx
-from configutator import ConfigMap, ArgMap
 import io, itertools, collections
 from sys import maxsize, stderr
 
-from FamilyRecord import FamilyRecord
+# If running directly, this works fine
+try:
+    from FamilyRecord import FamilyRecord
+    from configutator import ConfigMap, ArgMap, loadConfig
+except ModuleNotFoundError:
+    from ProDuSe.FamilyRecord import FamilyRecord
+    from ProDuSe.configutator import ConfigMap, ArgMap, loadConfig
 
 strandThreshold = 0.4 # 40% percent tolerance of deviation for the strand identifier sequence
 
@@ -243,11 +248,14 @@ def collapse(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, b
     outFile.close()
     outStream.close()
 
-if __name__ == "__main__":
+
+def main(args=None):
     from sys import stdout, stdin, stderr, argv, maxsize, maxsize
     import os, errno
-    from configutator import loadConfig
-    for argmap, paths in loadConfig(argv, (collapse,), title="Collapse V1.0"):
+
+    if args is None:
+        args = argv
+    for argmap, paths in loadConfig(args, (collapse,), title="Collapse V1.0"):
         if len(paths) and not os.path.exists(paths[0]):
             if 'verbose' in argmap[collapse] and argmap[collapse]['verbose']:
                 stderr.write("{} not found, skipping.\n".format(paths[0]))
@@ -259,3 +267,6 @@ if __name__ == "__main__":
                 if e.errno != errno.EEXIST:
                     raise
         collapse(open(paths[0], 'rb') if len(paths) else stdin, open(paths[1], 'wb+') if len(paths) > 1 else stdout, **argmap[collapse])
+
+if __name__ == "__main__":
+    main()

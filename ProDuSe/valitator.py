@@ -4,8 +4,11 @@ import typing
 from typing import NewType
 from inspect import Signature
 
-
-from tator import normaliseArgs
+# If calling directly
+try:
+    from tator import normaliseArgs
+except ModuleNotFoundError:
+    from ProDuSe.tator import normaliseArgs
 
 def validate(f, args: dict):
     for param, param_type in f.__annotations__.items():

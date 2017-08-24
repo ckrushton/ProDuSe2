@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 import io
 from sys import stderr
-import FastqRecord
-from configutator import ConfigMap, ArgMap
+
+# If running directly, this works fine
+try:
+    import FastqRecord
+    from configutator import ConfigMap, ArgMap, loadConfig
+# If installed
+except ModuleNotFoundError:
+    from ProDuSe import FastqRecord
+    from ProDuSe.configutator import ConfigMap, ArgMap, loadConfig  
 
 IUPACCodeDict = {
     'A' : ['A'],    #Adenine
@@ -79,11 +86,14 @@ def trim(inStream1: io.IOBase, inStream2: io.IOBase, outStream: io.IOBase, barco
     outStream.close()
     return discard, count
 
-if __name__ == "__main__":
+
+def main(args=None):
     from sys import stdout, stdin, argv
     import gzip, os, errno
-    from configutator import loadConfig
-    for argmap, paths in loadConfig(argv, (trim,), title="Trim V1.0"):
+
+    if args is None:
+        args = argv
+    for argmap, paths in loadConfig(args, (trim,), title="Trim V1.0"):
         if len(paths):
             inFile = open(paths[0], 'rb')
             if inFile.peek(2)[:2] == b'\037\213':
@@ -104,3 +114,6 @@ if __name__ == "__main__":
         else:
             outFile = stdout
         trim(inFile, outFile, **argmap[trim])
+
+if __name__ == "__main__":
+    main()

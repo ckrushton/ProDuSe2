@@ -229,6 +229,7 @@ if __name__ == "__main__":
     ConfigMap(_func='collapse', verbose=None)(collapse)
     ArgMap(_func=trim.__name__, verbose='verbose')(trim)
     ArgMap(_func=collapse.__name__, verbose='verbose')(collapse)
+    print("Hi")
     for argmap, params in loadConfig(sys.argv, (ProDuSe, trim, collapse), batchExpression='samples'):
         global config
         config = argmap
