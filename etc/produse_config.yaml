@@ -1,0 +1,63 @@
+default: &default
+  output: ./
+  bwa: bwa mem -t 10
+  samtools: samtools
+
+  trim: &trim_default
+    barcode_distance: 3
+
+  collapse: &collapse_default
+    barcode_mask: "SSS1111111111110"
+    barcode_distance: 3
+
+  filter: &filter_default
+    min_molecules: 2
+    mutant_molecules: 3
+    variant_allele_fraction_threshold: 0.01
+    min_reads_per_uid: 1
+
+samples:
+  - name: test1
+    <<: *default     # Inherit default parameters
+    fastqs:
+      - test/test1/onm_R1.fastq
+      - test/test1/onm_R1.fastq
+    trim:
+      <<: *trim_default
+      barcode_sequence: NNNWSMRWSYWKMWWT
+
+  - name: test2
+    <<: *default     # Inherit default parameters
+    fastqs:
+      - test/test2/afnm_R1.fastq
+      - test/test2/afnm_R2.fastq
+    trim:
+      <<: *trim_default
+      barcode_sequence: NNNWSMRWSYWKMWWT
+
+  - name: test3
+    <<: *default     # Inherit default parameters
+    fastqs:
+      - test/test3/osm_R1.fastq
+      - test/test3/osm_R2.fastq
+    trim:
+      <<: *trim_default
+      barcode_sequence: NNNSWMRSWYWMKWWT
+
+  - name: test4
+    <<: *default     # Inherit default parameters
+    fastqs:
+      - test/test4/afsm_R1.fastq
+      - test/test4/afsm_R2.fastq
+    trim:
+      <<: *trim_default
+      barcode_sequence: NNNWSMRWSYWKMWWT
+
+  - name: test5
+    <<: *default     # Inherit default parameters
+    fastqs:
+      - test/test5/wv_R1.fastq
+      - test/test5/wv_R2.fastq
+    trim:
+      <<: *trim_default
+      barcode_sequence: NNNWSMRWSYWKMWWT
