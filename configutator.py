@@ -1,6 +1,6 @@
 import re, os, pickle, sys
 from getopt import gnu_getopt
-from inspect import signature, getdoc, Parameter
+from inspect import signature, getdoc, getfile, Parameter
 
 from tator import normaliseArgs
 from valitator import validate
@@ -263,7 +263,7 @@ def configUI(screen, functions: list, yaml_node, call_name, title=''):
 
 # -- Loader --
 
-def loadConfig(args: list, functions: tuple, title='', configParam='config', defaultConfig=None, configExpression = None, paramExpression = None, batchExpression=None) -> (dict, list):
+def loadConfig(args: list, functions: tuple, title='', positionalDoc: list=[], configParam='config', defaultConfig=None, configExpression = None, paramExpression = None, batchExpression=None) -> (dict, list):
     if isinstance(configExpression, str):
         configExpression = jmespath.compile(configExpression)
     if isinstance(paramExpression, str):
@@ -291,7 +291,16 @@ def loadConfig(args: list, functions: tuple, title='', configParam='config', def
     for opt, val in optList:
         if opt == '-h':
             from sys import stderr
-            if title: stderr.write(title + '\n')
+            import __main__
+            try:
+                if title: stderr.write("{}\tUse: {} [options] {}\n{}\n".format(
+                                        title,
+                                        getfile(__main__),
+                                        ' '.join([name for name, _ in positionalDoc]),
+                                        '\n'.join([name + ' - ' + desc for name, desc in positionalDoc if desc])
+                                        ))
+            except TypeError:
+                pass
             for f in functions:
                 # Build command line argument option descriptions from function parameters
                 sig = signature(f)

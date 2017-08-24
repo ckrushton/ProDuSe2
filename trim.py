@@ -32,7 +32,7 @@ def IUPACMatch(code1: str, code2: str) -> bool:
 @ArgMap(inStream=None, mateStream=None, outStream=None, logStream=None)
 def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barcode_sequence: str, reverse: bool = False, mateStream: io.IOBase = None, verbose: bool = False, logStream: io.IOBase=stderr) -> (int, int):
     """
-    Trims barcodes
+    Trims barcodes from reads in a fastq file
     :param inStream: A file or stream handle to read input data
     :param mateStream: A file or stream handle to read mate input data
     :param outStream: A file or stream handle to output data
@@ -89,7 +89,12 @@ if __name__ == "__main__":
     from sys import stdout, stdin, argv
     import gzip, os, errno
     from configutator import loadConfig
-    for argmap, paths in loadConfig(argv, (trim,), title="Trim V1.0"):
+    pathsDoc = [
+        ('reads.fastq[.gz]', 'Fastq with reads to trim'),
+        ('[mates.fastq[.gz]]', 'Mates fastq that will also be trimmed and interlaced in the output'),
+        ('output.fastq[.gz]', 'Path to output trimmed fastq to')
+    ]
+    for argmap, paths in loadConfig(argv, (trim,), title='Trim V1.0', positionalDoc=pathsDoc):
         if len(paths):
             inFile = open(paths[0], 'rb')
             if inFile.peek(2)[:2] == b'\037\213':
