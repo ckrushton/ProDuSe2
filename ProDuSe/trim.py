@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 import io
 from sys import stderr
-import FastqRecord
-from configutator import ConfigMap, ArgMap
+
+# If running directly, this works fine
+try:
+    import FastqRecord
+    from configutator import ConfigMap, ArgMap, loadConfig
+# If installed
+except ModuleNotFoundError:
+    from ProDuSe import FastqRecord
+    from ProDuSe.configutator import ConfigMap, ArgMap, loadConfig  
 
 IUPACCodeDict = {
     'A' : ['A'],    #Adenine
@@ -85,10 +92,12 @@ def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barco
     outStream.close()
     return discard, count
 
-if __name__ == "__main__":
+
+def main(args=None):
     from sys import stdout, stdin, argv
     import gzip, os, errno
-    from configutator import loadConfig
+    if args is None:
+        args = argv
     pathsDoc = [
         ('reads.fastq[.gz]', 'Fastq with reads to trim'),
         ('[mates.fastq[.gz]]', 'Mates fastq that will also be trimmed and interlaced in the output'),
@@ -122,3 +131,7 @@ if __name__ == "__main__":
         else:
             outFile = stdout
         trim(inFile, outFile, mateStream=mateFile, **argmap[trim])
+
+if __name__ == "__main__":
+    main()
+

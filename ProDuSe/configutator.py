@@ -2,8 +2,14 @@ import re, os, pickle, sys
 from getopt import gnu_getopt
 from inspect import signature, getdoc, getfile, Parameter
 
-from tator import normaliseArgs
-from valitator import validate
+# If calling directly, this works fine
+try:
+    from tator import normaliseArgs
+    from valitator import validate
+# If installed
+except ModuleNotFoundError:
+    from ProDuSe.tator import normaliseArgs
+    from ProDuSe.valitator import validate
 
 import ruamel.yaml
 from ruamel.yaml.comments import CommentedMap

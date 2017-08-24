@@ -5,9 +5,16 @@ if platform.python_implementation() == 'PyPy':
 else:
     import pysam
 from sys import maxsize, stderr
-from CigarIterator import CigarIterator, appendOrInc
 import multiprocessing, ctypes, io
-import parapysam
+
+# If running as a script, this works fine
+try:
+    from CigarIterator import CigarIterator, appendOrInc
+    import parapysam
+# If installed
+except ModuleNotFoundError:
+    from ProDuSe.CigarIterator import CigarIterator, appendOrInc
+    from ProDuSe import parapysam
 
 default_cost = {
     pysam.CMATCH: lambda x: -x,
