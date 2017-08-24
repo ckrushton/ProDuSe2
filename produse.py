@@ -58,6 +58,9 @@ def displayVerbose(screen, sel: selectors.DefaultSelector, data, poll):
     scene = Scene([BioMatrix(screen), window])
     layout = Widgets.Layout([1])
     window.add_layout(layout)
+    outputFile = Widgets.Text('Output', 'output')
+    outputFile.disabled = True
+    layout.add_widget(outputFile)
     # Trim
     label = Widgets.Label("Trim:")
     label.custom_colour = 'section_header'
@@ -205,9 +208,10 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, output: str, bwa: Execu
         poll = lambda : trimProc.is_alive() or clipProc.is_alive() or bwa.poll() or sort.poll() #or collapseProc.is_alive()
         from asciimatics.screen import Screen
         from asciimatics.exceptions import ResizeScreenError, StopApplication
+        # Handle screen resize by rebuilding screen
         while True:
             try:
-                Screen.wrapper(displayVerbose, arguments=(sel, OrderedDict(lineBuffers), poll))
+                Screen.wrapper(displayVerbose, arguments=(sel, OrderedDict(lineBuffers + [('output', output)]), poll))
             except ResizeScreenError:
                 continue
             except StopApplication:

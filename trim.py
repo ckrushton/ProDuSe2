@@ -56,7 +56,7 @@ def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barco
         barcode_distance *= -1
     while record1.read(inStream) and (not mated or record2.read(mateStream)):
         if verbose:
-            logStream.write("\x1b[F\x1b[2K\r{file}\tWorking on record: {record}\tRecords processed: {total}\n".format(file=inStream.name if hasattr(inStream, 'name') else 'Streaming', record=record1.name, total=count))
+            logStream.write("\x1b[F\x1b[2K\r{file}\tWorking on record: {record}\tRecords processed: {total}\n".format(file=outStream.name if hasattr(outStream, 'name') else 'Streaming', record=record1.name, total=count))
         count += 1
         # Store barcode in sequence description
         barcode1 = (record1.seq[-len(barcode_sequence):] if reverse else record1.seq[:len(barcode_sequence)])
@@ -81,7 +81,7 @@ def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barco
                 record.trim(0 if reverse else len(barcode_sequence), len(barcode_sequence) if reverse else 0)
             record.write(outStream)
     if verbose:
-        logStream.write("\x1b[F\x1b[2K\r{file}\tTotal records: {total}\tRecords discarded: {discard}\n".format(file=inStream.name if hasattr(inStream, 'name') else 'Streaming', total=count, discard=discard))
+        logStream.write("\x1b[F\x1b[2K\r{file}\tTotal records: {total}\tRecords discarded: {discard}\n".format(file=outStream.name if hasattr(outStream, 'name') else 'Streaming', total=count, discard=discard))
     outStream.close()
     return discard, count
 
