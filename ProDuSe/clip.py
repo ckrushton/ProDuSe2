@@ -7,7 +7,7 @@ else:
 from sys import maxsize, stderr
 import multiprocessing, ctypes, io
 
-# If running as a script, this works fine
+# If running directly, this works fine
 try:
     from CigarIterator import CigarIterator, appendOrInc
     import parapysam
@@ -415,7 +415,8 @@ def clip(inStream: io.IOBase, outStream: io.IOBase, threads: int = 8, maxTLen: i
         logStream.write("\x1b[F\x1b[2K\rCompleted.\n")
     outStream.close()
 
-if __name__ == '__main__':
+
+def main(args=None):
     import getopt, os, errno
     from sys import stdout, stdin, argv
     threads = 2
@@ -427,11 +428,19 @@ if __name__ == '__main__':
     clipOnly = False
     verbose = False
 
+    if args is None:
+        args = argv[1:]
     #Command line options
+<<<<<<< b4bbda44915c7d50d898dabb9b184872e8d194bc
     stderr.write("Clip Overlap v1.0\n")
     ops, paths = getopt.gnu_getopt(argv[1:], 't:m:ho:svabc')
+=======
+    stderr.write("Clip v1.0\n")
+    ops, paths = getopt.gnu_getopt(args, 't:m:ho:sva')
+>>>>>>> Added compatibility with clip
     if not len(ops) and not len(paths):
-        stderr.write("Use -h for help.\n")
+        stderr.write("Waiting on stdin. Try -h for help. Use ctrl+c to cancel.\n")
+
     else:
         for op, val in ops:
             if op == '-h':
@@ -446,7 +455,7 @@ if __name__ == '__main__':
                              "-o [sbuc] Output format: s=SAM (Default), b=BAM compressed, bu=BAM uncompressed, c=CRAM\n"
                              "-s Maintain input order (High depth regions may fill RAM), if not set will output in arbitrary order (Minimal RAM)\n"
                              "-v Verbose status output\n")
-                exit()
+                exit(1)
             elif op == '-t':
                 threads = int(val or 1)
             elif op == '-m':
@@ -472,3 +481,7 @@ if __name__ == '__main__':
                 raise
 
     clip(paths[0] if len(paths) else stdin, open(paths[1], 'wb+') if len(paths) > 1 else stdout, threads, maxTLen, outFormat, ordered, alternate, clipOnly, trimTail, verbose)
+
+if __name__ == '__main__':
+    main()
+
