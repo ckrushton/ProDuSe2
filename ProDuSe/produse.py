@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
 import sys, os, tempfile, shutil, gzip, selectors, re
 
-from collapse import collapse
-from clip import clip
-from trim import trim
+# If called directly, this works fine
+try:
+    from collapse import collapse
+    from clip import clip
+    from trim import trim
+    from configutator import ConfigMap, ArgMap, loadConfig
+    from valitator import Path, PathOrNone, Executable
+# If installed
+except ModuleNotFoundError:
+    from ProDuSe.collapse import collapse
+    from ProDuSe.clip import clip
+    from ProDuSe.trim import trim
+    from ProDuSe.configutator import ConfigMap, ArgMap, loadConfig
+    from ProDuSe.valitator import Path, PathOrNone, Executable
 
 from multiprocessing import Process
 from subprocess import Popen, PIPE
 
-from configutator import ConfigMap, ArgMap, loadConfig
-from valitator import Path, PathOrNone, Executable
 
 def pipeOpener(file, flags):
     return os.open(file, flags|os.O_RDONLY|os.O_NONBLOCK)
@@ -228,13 +237,19 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, output: str, bwa: Execu
     sort.wait()
     shutil.rmtree(temp_dir)
 
-if __name__ == "__main__":
+
+def main(args=None):
+
+    if args is None:
+        args = sys.argv
     ConfigMap(_func='trim', verbose=None)(trim)
     ConfigMap(_func='collapse', verbose=None)(collapse)
     ArgMap(_func=trim.__name__, verbose='verbose')(trim)
     ArgMap(_func=collapse.__name__, verbose='verbose')(collapse)
-    print("Hi")
-    for argmap, params in loadConfig(sys.argv, (ProDuSe, trim, collapse), batchExpression='samples'):
+    for argmap, params in loadConfig(args, (ProDuSe, trim, collapse), batchExpression='samples'):
         global config
         config = argmap
         ProDuSe(**argmap[ProDuSe])
+
+if __name__ == "__main__":
+    main()
