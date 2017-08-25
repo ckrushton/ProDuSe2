@@ -29,15 +29,18 @@ class FamilyRecord:
         def inSeq(self) -> bool:  # Returns true if the operation has a sequence coordinate
             return self.op in (pysam.CMATCH, pysam.CINS, pysam.CSOFT_CLIP, pysam.CEQUAL, pysam.CDIFF)
 
-    __slots__ = 'name', 'pos', 'maxMapQ', 'cols', 'members'
-    def __init__(self, name: str, pos: int, record: pysam.AlignedSegment = None):
+    __slots__ = 'name', 'pos', 'maxMapQ', 'cols', 'members', 'mate', 'barcode', 'refID', 'forwardCounter'
+    def __init__(self, name: str, pos: int, barcode: str, record: pysam.AlignedSegment):
         self.name = name
         self.pos = pos
         self.cols = []
         self.maxMapQ = 0
         self.members = []
-        if record:
-            self.aggregate(record)
+        self.mate = None #type: FamilyRecord
+        self.barcode = barcode
+        self.refID = record.reference_id
+        self.forwardCounter = 0
+        self.aggregate(record)
 
     def getOpsAt(self, pos: int):
         def OPitr():
@@ -76,6 +79,7 @@ class FamilyRecord:
             i += 1
             recordItr.next()
         self.members.append(record.query_name)
+        self.forwardCounter += 1 - (2 * record.is_reverse) # Increment if forward, decrement if reverse
 
     def __iadd__(self, other: 'FamilyRecord'):
         if self.maxMapQ < other.maxMapQ:
@@ -95,60 +99,47 @@ class FamilyRecord:
             self.cols.append(other.cols[pos])
             pos += 1
         self.members += other.members
+        self.forwardCounter += other.forwardCounter
         return self
 
     def __len__(self):
         return len(self.members)
 
-    @property
-    def is_positive_strand(self) -> bool:
+    def getConcensusAt(self, pos: int) -> (int, str or None, int or None, int or None, int or None):
+        """
+        Compute the consensus operation at a specified position in the record.
+        Everything but the returned op may be None if not relevant to op.
+        :param pos: The position in the record in cigar space
+        :return: Tuple(op code, base, qScore, depth at pos, Phred score of wrong op chosen)
+        """
+        colOps = list(self.cols[pos].values())
+        bestOp = colOps[0]
+        totalN = 0
+        totalQ = 0
+        base = None
+        qual = None
+        fC = None
+        fQ = None
+        for op in colOps:
+            totalN += op.count
+            totalQ += op.qSum
+            if bestOp.qSum < op.qSum:
+                bestOp = op
+        if bestOp.inSeq():
+            base = bestOp.allele
+            qual = bestOp.maxQ
+            op = op.op
+            if (totalQ - bestOp.qSum) > 0:
+                fQ = int(round(-10 * math.log10((totalQ - bestOp.qSum) * bestOp.count / (totalQ * totalN))))
+            else:
+                fQ = 93  # Max Phred Score
+            fC = totalN
+        return op, base, qual, fC, fQ
 
-        return False #TODO
-
-    def toPysam(self) -> pysam.AlignedSegment:
-        seq = ""
-        qual = []
-        ops = []
-        fQ = []
-        fC = []
-
-        # Compile sequence and added tags
-        # fQ:B:C Integer array containing Phred score of wrong base chosen during collapse
-        # fC:B:I Integer array containing pairs (simmilar to a CIGAR) of count and depth representing, from the start of the alignment, the depth of the family at a position
-        for col in self.cols: #dict
-            colOps = list(col.values())
-            bestOp = colOps[0]
-            totalN = 0
-            totalQ = 0
-            for op in colOps:
-                totalN += op.count
-                totalQ += op.qSum
-                if bestOp.qSum < op.qSum:
-                    bestOp = op
-            if bestOp.inSeq():
-                seq += bestOp.allele
-                qual.append(bestOp.maxQ)
-                appendOrInc(ops, [op.op, 1])
-                if (totalQ - bestOp.qSum) > 0:
-                    fQ.append(int(round(-10*math.log10((totalQ - bestOp.qSum) * bestOp.count / (totalQ * totalN)))))
-                else:
-                    fQ.append(93) # Max Phred Score
-                fC.append(totalN)
-        tags = []
-        if fQ:
-            tags.append(('fQ', fQ))
-        if fC:
-            tags.append(('fC', fC))
-
-        # Copy into pysam record
-        record = pysam.AlignedSegment()
-        record.query_name = self.pos + self.name
-        record.reference_start = self.pos
-        record.mapping_quality = self.maxMapQ
-        record.flag = 17
-        record.cigartuples = ops
-        record.query_sequence = seq
-        record.query_qualities = qual
-        if tags:
-            record.set_tags(tags)
-        return record
+    def __iter__(self):
+        """
+        Iterate every position returning result of self.getConcensusAt()
+        :return: Generator that iterates all positions in self.cols
+        """
+        for pos in range(len(self.cols)):
+            yield self.getConcensusAt(pos)
