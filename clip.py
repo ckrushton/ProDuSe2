@@ -74,7 +74,7 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
             if i.inRef: dist -= i.opRemaining
             if not i.nextOp(): break
 
-        #If end within op, copy in remainder
+        #If end within op range, copy in remainder
         if i.valid:
             checkForFirstMatch()
             appendOrInc(ops, [i.op, dist])
@@ -149,9 +149,10 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
                     qual += [fromItr.baseQual]
             appendOrInc(ops, [toItr.op, 1])
         else:
+            # TODO Merge insertion without moving mate iterator? to try to better align matched regions between mates
             if toOptimal == None:
                 # Dont calculate costs if unnecessary
-                toOptimal = calculateAlignmentCost(toRecord, refStart, refEnd, costs) > calculateAlignmentCost(fromRecord, refStart, refEnd, costs)
+                toOptimal = calculateAlignmentCost(toRecord, refStart, refEnd, costs) < calculateAlignmentCost(fromRecord, refStart, refEnd, costs)
             if toOptimal:
                 if toItr.inSeq:
                     seq += toItr.seqBase
