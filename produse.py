@@ -177,7 +177,7 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, output: str, bwa: Execu
 
     # Start sort by coord
     if verbose: stderr.write("Starting sort subprocess..\n")
-    sort = Popen([samtools, "sort", "-l0", "-"], stdout=open(output, 'wb+'), stdin=PIPE)
+    sort = Popen([samtools, "sort", "-l0", "-"], stdout=PIPE, stdin=PIPE)
 
     #Start clipping subprocess
     if verbose:
@@ -195,9 +195,9 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, output: str, bwa: Execu
         r, w = os.pipe()
         os.set_inheritable(w, True)
         debugPipes.append(open(r, 'rb'))
-    #collapseProc = Process(target=collapse, kwargs=dict(inStream=sort.stdout, outStream=os.devnull, **config[collapse], logStream=open(w if verbose else os.devnull, 'w', buffering=1)))
-    #collapseProc.start()
-    #sort.stdout.close()
+    collapseProc = Process(target=collapse, kwargs=dict(inStream=sort.stdout, outStream=open(output, 'wb+'), **config[collapse], logStream=open(w if verbose else os.devnull, 'w', buffering=1)))
+    collapseProc.start()
+    sort.stdout.close()
 
     if verbose:
         from collections import OrderedDict
@@ -221,7 +221,7 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, output: str, bwa: Execu
     inFile1.close()
     inFile2.close()
     clipProc.join()
-    #collapseProc.join()
+    collapseProc.join()
     bwa.wait()
     if bed:
         view.wait()
