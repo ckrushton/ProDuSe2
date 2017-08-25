@@ -331,7 +331,7 @@ def loadConfig(args: list, functions: tuple, title='', positionalDoc: list=[], c
     for opt, val in optList:
         if opt == '--' + configParam:
             if not (os.path.isfile(val) and os.access(val, os.R_OK)):
-                raise FileNotFoundError("The config path was not found: {}".format(val))
+                raise FileNotFoundError("Unable to locate configuration file {}".format(val))
             for o, v in optList:
                 if o == '--{}:'.format(configParam):
                     configExpression = jmespath.compile(v)
