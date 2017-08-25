@@ -11,9 +11,17 @@ from configutator import ConfigMap, ArgMap
 import io, itertools, collections
 from sys import maxsize, stderr
 
-from FamilyRecord import FamilyRecord
+from FamilyRecord import FamilyRecord, appendOrInc
 
 strandThreshold = 0.4 # 40% percent tolerance of deviation for the strand identifier sequence
+strandMaskId = 'S'
+OSTagName = 'OS' # Id for original start position tag
+
+def getBarcode(record: pysam.AlignedSegment):
+    try:
+        return record.get_tag("BC")
+    except KeyError:
+        raise ValueError("Record found without BC tag. All records must have BC tag.")
 
 def pairwise(iterable):
     """Taken from https://docs.python.org/3.4/library/itertools.html#itertools-recipes"""
@@ -58,7 +66,7 @@ def familyName(record: pysam.AlignedSegment, barcodeMask: str) -> str:
     :param barcodeMask: String mask containing '0' for any elements to exclude from the name
     :return: String containing family name
     """
-    return ("R" if record.is_reverse else "F") + maskString(record.get_tag("BC"), barcodeMask, '0', True)
+    return ("R" if record.is_reverse else "F") + maskString(getBarcode(record), barcodeMask, '0', True)
 
 def strandCode(familyName: str, mask: str, invert: bool = False) -> str:
     """
@@ -69,7 +77,7 @@ def strandCode(familyName: str, mask: str, invert: bool = False) -> str:
     :return: String containing the strand specific region of the family name
     """
     mask = mask.replace('0', '') # Family name is result of masking '0' so remove
-    return maskString(familyName, mask, 'S', invert)
+    return maskString(familyName, mask, strandMaskId, invert)
 
 class Families:
     def __init__(self, barcode_mask: str, barcode_distance: int):
@@ -77,24 +85,26 @@ class Families:
         self._familyMateMap = {}
         self._barcode_mask = barcode_mask
         self._barcode_distance = barcode_distance
+        self._recordCounter = 1
 
     def addRecord(self, record: pysam.AlignedSegment):
         try:
-            startPos = record.get_tag('OS')  # type: int
+            startPos = record.get_tag(OSTagName)  # type: int
         except KeyError:
             startPos = record.reference_start
         pos = self._familyRecords.get(startPos)
         family = familyName(record, self._barcode_mask)
-        self._familyMateMap[record.query_name] = family
-        # TODO ensure families are seperated by strand threshold
         if pos is None:
-            self._familyRecords[startPos] = {family: FamilyRecord(family, startPos, record)}
+            familyRecord = FamilyRecord(family, startPos, getBarcode(record), record)
+            self._familyRecords[startPos] = {family: familyRecord}
         else:
             familyRecord = pos.get(family)
             if familyRecord:
                 familyRecord.aggregate(record)
             else:
-                pos[family] = FamilyRecord(family, startPos, record)
+                familyRecord = FamilyRecord(family, startPos, getBarcode(record), record)
+                pos[family] = familyRecord
+        self._familyMateMap[(record.query_name, record.is_reverse)] = familyRecord
 
     def _cutTreeToThreshold(self, forest, tree, thresholdDiameter):
         for branch in nx.connected_component_subgraphs(tree): # tree may already be disconnected
@@ -141,7 +151,13 @@ class Families:
             graph = nx.empty_graph(len(pos)) #type: nx.Graph
             for node, data in graph.nodes_iter(True):
                 data['weight'] = pos[keys[node]].size
+            # TODO ensure families are seperated by strand threshold and F/R
             for u, v in itertools.combinations(range(len(pos)), 2):
+                # Keep families with F/R separate
+                if keys[u][0] != keys[v][0]: continue
+                # Keep families with different strand specific tags separate
+                if hamming(strandCode(keys[u], self._barcode_mask), strandCode(keys[v], self._barcode_mask)) / self._barcode_mask.count(strandMaskId) > strandThreshold: continue
+                # Keep families with a hamming distance greater than threshold separate
                 dist = hamming(strandCode(keys[u], self._barcode_mask, True), strandCode(keys[v], self._barcode_mask, True), self._barcode_distance)
                 if dist < self._barcode_distance: graph.add_edge(u, v, weight=dist)
             thresholdDiameter = 2 * self._barcode_distance
@@ -155,7 +171,7 @@ class Families:
                 #Merge together members of component
                 for node in component[1:]:
                     other = pos[keys[node]] #type: FamilyRecord
-                    for member in other.members: self._familyMateMap[member] = first.name # Update family mappings
+                    for member in other.members: self._familyMateMap[member] = first # Update family mappings
                     first += other
                     del pos[keys[node]]
 
@@ -175,16 +191,91 @@ class Families:
         else:
             return {}
 
+    def setMate(self, family: FamilyRecord):
+        if family.mate:
+            return
+        counts = {}
+        popular = None
+        for member in family.members:
+            mateFamily = self._familyMateMap.get(member)
+            if mateFamily and not mateFamily.mate:
+                if mateFamily not in counts: counts[mateFamily] = 1
+                else: counts[mateFamily] += 1
+                if not mateFamily.mate and (popular is None or counts[popular] < counts[mateFamily]):
+                    popular = mateFamily
+        if popular:
+            family.mate = popular
+            family.mate.mate = family
+
+    def __iter__(self):
+        return self._familyRecords.__iter__()
+
     def __len__(self):
         return len(self._familyRecords)
 
     def __delitem__(self, pos):
         del self._familyRecords[pos]
 
+    def toPysam(self, family: FamilyRecord) -> (pysam.AlignedSegment, pysam.AlignedSegment):
+        self.setMate(family)
+        if family.mate.name != family.name:
+            family.name = self._recordCounter
+            family.mate.name = family.name
+            self._recordCounter += 1
+
+        seq = ""
+        qual = []
+        ops = []
+        fQ = []
+        fC = []
+
+        # Compile sequence and added tags
+        # fQ:B:C Integer array containing Phred score of wrong base chosen during collapse
+        # fC:B:I Integer array containing pairs (simmilar to a CIGAR) of count and depth representing, from the start of the alignment, the depth of the family at a position
+        for op, base, q, c, q in family:
+            appendOrInc(ops, [op, 1])
+            if seq:
+                seq += base
+                qual.append(q)
+                fC.append(c)
+                fQ.append(q)
+        tags = [('BC', family.barcode)]
+        if fQ:
+            tags.append(('fQ', fQ))
+        if fC:
+            tags.append(('fC', fC))
+
+        # Copy into pysam record
+        record = pysam.AlignedSegment()
+        record.query_name = family.name
+        record.reference_start = family.pos
+        record.mapping_quality = family.maxMapQ
+        record.cigartuples = ops
+        record.reference_id = family.refID
+        record.is_forward = family.forwardCounter >= 0
+        if family.mate:
+            record.is_paired = True
+            record.is_proper_pair = True
+            record.next_reference_start = family.mate.pos
+            record.next_reference_id = family.mate.refID
+            record.mate_is_reverse = family.mate.forwardCounter >= 0
+        else:
+            record.is_unmapped = True
+
+        record.query_sequence = seq
+        record.query_qualities = qual
+        if tags:
+            record.set_tags(tags)
+        return record
+
 def CoordinateSortedInputFamilyIterator(inFile, families):
-    startPos = 0
+    lastStartPos = 0
     for record in inFile.fetch(until_eof=True):
-        if startPos != record.reference_start:
+        try:
+            startPos = record.get_tag(OSTagName)  # type: int
+        except KeyError:
+            startPos = record.reference_start
+        if startPos != lastStartPos:
             f = families.getFamiliesAt(startPos).items()
             for _, family in f:
                 yield family
@@ -193,10 +284,7 @@ def CoordinateSortedInputFamilyIterator(inFile, families):
                     del families[startPos]
             except KeyError:
                 pass
-            try:
-                startPos = record.get_tag('OS')  # type: int
-            except KeyError:
-                startPos = record.reference_start
+            lastStartPos = startPos
         families.addRecord(record)
 
 @ConfigMap(inStream=None, outStream=None, logStream=None)
