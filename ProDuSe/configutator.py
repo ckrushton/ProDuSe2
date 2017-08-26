@@ -7,7 +7,7 @@ try:
     from tator import normaliseArgs
     from valitator import validate
 # If installed
-except ModuleNotFoundError:
+except ImportError:
     from ProDuSe.tator import normaliseArgs
     from ProDuSe.valitator import validate
 

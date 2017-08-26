@@ -12,7 +12,7 @@ try:
     from CigarIterator import CigarIterator, appendOrInc
     import parapysam
 # If installed
-except ModuleNotFoundError:
+except ImportError:
     from ProDuSe.CigarIterator import CigarIterator, appendOrInc
     from ProDuSe import parapysam
 
@@ -431,13 +431,8 @@ def main(args=None):
     if args is None:
         args = argv[1:]
     #Command line options
-<<<<<<< b4bbda44915c7d50d898dabb9b184872e8d194bc
     stderr.write("Clip Overlap v1.0\n")
     ops, paths = getopt.gnu_getopt(argv[1:], 't:m:ho:svabc')
-=======
-    stderr.write("Clip v1.0\n")
-    ops, paths = getopt.gnu_getopt(args, 't:m:ho:sva')
->>>>>>> Added compatibility with clip
     if not len(ops) and not len(paths):
         stderr.write("Waiting on stdin. Try -h for help. Use ctrl+c to cancel.\n")
 

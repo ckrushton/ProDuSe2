@@ -7,7 +7,7 @@ try:
     import FastqRecord
     from configutator import ConfigMap, ArgMap, loadConfig
 # If installed
-except ModuleNotFoundError:
+except ImportError:
     from ProDuSe import FastqRecord
     from ProDuSe.configutator import ConfigMap, ArgMap, loadConfig  
 
