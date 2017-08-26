@@ -15,7 +15,7 @@ from sys import stdout, stdin, stderr, argv, maxsize
 try:
     from FamilyRecord import FamilyRecord
     from configutator import ConfigMap, ArgMap, loadConfig
-except ModuleNotFoundError:
+except ImportError:
     from ProDuSe.FamilyRecord import FamilyRecord
     from ProDuSe.configutator import ConfigMap, ArgMap, PositionalArg, TransformCfg
 

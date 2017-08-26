@@ -9,7 +9,7 @@ try:
     from configutator import ConfigMap, ArgMap, loadConfig
     from valitator import Path, PathOrNone, Executable
 # If installed
-except ModuleNotFoundError:
+except ImportError:
     from ProDuSe.collapse import collapse
     from ProDuSe.clip import clip
     from ProDuSe.trim import trim

@@ -7,7 +7,7 @@ from inspect import Signature
 # If calling directly
 try:
     from tator import normaliseArgs
-except ModuleNotFoundError:
+except ImportError:
     from ProDuSe.tator import normaliseArgs
 
 def validate(f, args: dict):
