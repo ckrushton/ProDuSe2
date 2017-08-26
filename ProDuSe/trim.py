@@ -96,6 +96,7 @@ def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barco
 def main(args=None):
     from sys import stdout, stdin, argv
     import gzip, os, errno
+<<<<<<< HEAD:ProDuSe/trim.py
     if args is None:
         args = argv
     pathsDoc = [
@@ -104,6 +105,12 @@ def main(args=None):
         ('output.fastq[.gz]', 'Path to output trimmed fastq to')
     ]
     for argmap, paths in loadConfig(argv, (trim,), title='Trim V1.0', positionalDoc=pathsDoc):
+=======
+
+    if args is None:
+        args = argv
+    for argmap, paths in loadConfig(args, (trim,), title="Trim V1.0"):
+>>>>>>> ba875d83d42f7057b99a67e70aec1c364675065e:ProDuSe/trim.py
         if len(paths):
             inFile = open(paths[0], 'rb')
             if inFile.peek(2)[:2] == b'\037\213':
@@ -130,8 +137,15 @@ def main(args=None):
                 outFile = open(paths[i], 'wb+')
         else:
             outFile = stdout
+<<<<<<< HEAD:ProDuSe/trim.py
         trim(inFile, outFile, mateStream=mateFile, **argmap[trim])
 
 if __name__ == "__main__":
     main()
 
+=======
+        trim(inFile, outFile, **argmap[trim])
+
+if __name__ == "__main__":
+    main()
+>>>>>>> ba875d83d42f7057b99a67e70aec1c364675065e:ProDuSe/trim.py

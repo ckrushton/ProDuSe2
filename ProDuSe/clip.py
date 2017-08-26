@@ -432,7 +432,7 @@ def main(args=None):
         args = argv[1:]
     #Command line options
     stderr.write("Clip Overlap v1.0\n")
-    ops, paths = getopt.gnu_getopt(argv[1:], 't:m:ho:svabc')
+    ops, paths = getopt.gnu_getopt(args, 't:m:ho:sva')
     if not len(ops) and not len(paths):
         stderr.write("Waiting on stdin. Try -h for help. Use ctrl+c to cancel.\n")
 
@@ -479,4 +479,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-

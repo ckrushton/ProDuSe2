@@ -7,6 +7,7 @@ from inspect import Signature
 # If calling directly
 try:
     from tator import normaliseArgs
+# If running installed
 except ImportError:
     from ProDuSe.tator import normaliseArgs
 
