@@ -19,7 +19,6 @@ class FastqRecord(object):
         line4 = stream.readline().decode('ascii')
         if line4 == '': return False
 
-        # Generate index for record data
         nameEnd = line1.find(' ')
         self.name = line1[1:nameEnd]
         self.desc1 = line1[nameEnd+1:-1]
