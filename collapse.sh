@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-./collapse.py --config:batch: "samples[].[merge({output:join(\`\`, [output, \`collapsed/\`, name, \`.bam\`]), input:join(\`\`, [output, \`clipped/\`, name, \`.bam\`])}, collapse)] | []" --config:params: "[input, output]" "$@"
+./collapse.py --config:batch: "samples[].[merge({output:join(\`\`, [output, \`collapsed/\`, name, \`.bam\`]), input:join(\`\`, [output, \`clipped/\`, name, \`.bam\`])}, collapse)] | []" "$@"

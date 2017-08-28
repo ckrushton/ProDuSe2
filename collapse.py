@@ -7,9 +7,9 @@ else:
 
 import sortedcontainers
 import networkx as nx
-from configutator import ConfigMap, ArgMap
+from configutator import ConfigMap, ArgMap, PositionalArg, TransformCfg
 import io, itertools, collections
-from sys import maxsize, stderr
+from sys import stdout, stdin, stderr, argv, maxsize
 
 from FamilyRecord import FamilyRecord, appendOrInc
 
@@ -19,7 +19,7 @@ OSTagName = 'OS' # Id for original start position tag
 
 def getBarcode(record: pysam.AlignedSegment):
     try:
-        return record.get_tag("BC")
+        return record.get_tag('BC')
     except KeyError:
         raise ValueError("Record found without BC tag. All records must have BC tag.")
 
@@ -191,6 +191,11 @@ class Families:
         else:
             return {}
 
+    def __getitem__(self, pos):
+        p = self._familyRecords[pos]
+        self._collapsePosition(p)
+        return p
+
     def setMate(self, family: FamilyRecord):
         if family.mate:
             return
@@ -287,9 +292,18 @@ def CoordinateSortedInputFamilyIterator(inFile, families):
             lastStartPos = startPos
         families.addRecord(record)
 
-@ConfigMap(inStream=None, outStream=None, logStream=None)
-@ArgMap(inStream=None, outStream=None, logStream=None)
-def collapse(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barcode_mask: str, verbose: bool=False, logStream: io.IOBase=stderr):
+def createAndOpen(path, mode):
+    if not os.path.exists(os.path.dirname(path)):
+        try:
+            os.makedirs(os.path.dirname(path))
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+    return open(path, mode)
+
+@ConfigMap(inStream=TransformCfg('input', (open, None, ('rb',))), outStream=TransformCfg('output', (createAndOpen, None, ('wb+',))), logStream=TransformCfg('log', (createAndOpen, None, ('w+',))))
+@ArgMap(inStream=PositionalArg(0, 'input', 'Path to input bam file with barcoded reads.', (createAndOpen, None, ('wb+',))), outStream=PositionalArg(1, 'output', 'Path to input bam file with barcoded reads.'), logStream=PositionalArg(2, 'log', 'Path to output verbose log.'))
+def collapse(barcode_distance: int, barcode_mask: str, verbose: bool=False, inStream: io.IOBase=stdin, outStream: io.IOBase=stdout,  logStream: io.IOBase=stderr):
     """
     Collapse reads sharing the same start position, forward/reverse, and barcode into a single family record.
     :param inStream: A file or stream handle to read input data
@@ -304,7 +318,7 @@ def collapse(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, b
         logStream.write("\n") # This will be deleted by the next write
     inFile = pysam.AlignmentFile(inStream)
     outFile = pysam.AlignmentFile(outStream, "wbu" if hasattr(outStream, 'name') else "wb", template=inFile) # compress the data if it is a file
-    families = Families(barcode_mask*2, barcode_distance) # reads have mate barcode concatenated so double up mask
+    families = Families(barcode_mask*2, barcode_distance) # reads have mate barcode concatenated so double up mask # TODO multiply distance by 2?
     count = 0
     fcount = 0
     lastFCount = 0
@@ -332,18 +346,14 @@ def collapse(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, b
     outStream.close()
 
 if __name__ == "__main__":
-    from sys import stdout, stdin, stderr, argv, maxsize, maxsize
     import os, errno
     from configutator import loadConfig
-    for argmap, paths in loadConfig(argv, (collapse,), title="Collapse V1.0"):
-        if len(paths) and not os.path.exists(paths[0]):
-            if 'verbose' in argmap[collapse] and argmap[collapse]['verbose']:
-                stderr.write("{} not found, skipping.\n".format(paths[0]))
+    cfgs = loadConfig(argv, (collapse,), title="Collapse V1.0")
+    while True: # Skip missing inputs
+        try:
+            argmap = next(cfgs)
+            collapse(**argmap[collapse])
+        except ValueError:
             continue
-        if len(paths) > 1 and not os.path.exists(os.path.dirname(paths[1])):
-            try:
-                os.makedirs(os.path.dirname(paths[1]))
-            except OSError as e:
-                if e.errno != errno.EEXIST:
-                    raise
-        collapse(open(paths[0], 'rb') if len(paths) else stdin, open(paths[1], 'wb+') if len(paths) > 1 else stdout, **argmap[collapse])
+        except StopIteration:
+            break

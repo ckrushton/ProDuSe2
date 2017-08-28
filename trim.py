@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-import io
-from sys import stderr
+import io, gzip
+from sys import stdin, stdout, stderr
 import FastqRecord
-from configutator import ConfigMap, ArgMap
+from configutator import ConfigMap, ArgMap, PositionalArg, TransformCfg
 
 IUPACCodeDict = {
     'A' : ['A'],    #Adenine
@@ -28,9 +28,27 @@ IUPACCodeDict = {
 def IUPACMatch(code1: str, code2: str) -> bool:
     return code2 in IUPACCodeDict[code1]
 
-@ConfigMap(inStream=None, mateStream=None, outStream=None, logStream=None)
-@ArgMap(inStream=None, mateStream=None, outStream=None, logStream=None)
-def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barcode_sequence: str, reverse: bool = False, mateStream: io.IOBase = None, verbose: bool = False, logStream: io.IOBase=stderr) -> (int, int):
+def openGZ(path, mode):
+    fh = open(path, mode)
+    if fh.peek(2)[:2] == b'\037\213':
+        fh = gzip.open(fh)
+    return fh
+
+def createAndOpen(path, mode):
+    if not os.path.exists(os.path.dirname(path)):
+        try:
+            os.makedirs(os.path.dirname(path))
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+    if path.endswith('.gz'):
+        return gzip.open(path, mode)
+    else:
+        return open(path, mode)
+
+@ConfigMap(inStream=TransformCfg('input', (openGZ, None, ('rb',))), mateStream= TransformCfg('mate', (openGZ, None, ('rb',))), outStream=TransformCfg('output', (createAndOpen, None, ('wb+',))), logStream=TransformCfg('log', (createAndOpen, None, ('w+',))))
+@ArgMap(inStream=PositionalArg(0, 'reads.fastq[.gz]', 'Path to fastq with reads to trim.', (openGZ, None, ('wb+',))), mateStream=PositionalArg(1, 'mates.fastq[.gz]', 'Mates fastq that will also be trimmed and interlaced in the output.', (openGZ, None, ('wb+',))), outStream=PositionalArg(2, 'output.fastq[.gz]', 'Path to output trimmed fastq to.', (createAndOpen, None, ('wb+',))), logStream=PositionalArg(3, 'log', 'Path to output verbose log.', (createAndOpen, None, ('wb+',))))
+def trim(barcode_distance: int, barcode_sequence: str, reverse: bool = False, inStream: io.IOBase = stdin, outStream: io.IOBase = stdout, mateStream: io.IOBase = None, verbose: bool = False, logStream: io.IOBase=stderr) -> (int, int):
     """
     Trims barcodes from reads in a fastq file
     :param inStream: A file or stream handle to read input data
@@ -87,38 +105,7 @@ def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barco
 
 if __name__ == "__main__":
     from sys import stdout, stdin, argv
-    import gzip, os, errno
+    import os, errno
     from configutator import loadConfig
-    pathsDoc = [
-        ('reads.fastq[.gz]', 'Fastq with reads to trim'),
-        ('[mates.fastq[.gz]]', 'Mates fastq that will also be trimmed and interlaced in the output'),
-        ('output.fastq[.gz]', 'Path to output trimmed fastq to')
-    ]
-    for argmap, paths in loadConfig(argv, (trim,), title='Trim V1.0', positionalDoc=pathsDoc):
-        if len(paths):
-            inFile = open(paths[0], 'rb')
-            if inFile.peek(2)[:2] == b'\037\213':
-                inFile = gzip.open(inFile)
-        else:
-            inFile = stdin
-        if len(paths) > 2:
-            mateFile = open(paths[1], 'rb')
-            if mateFile.peek(2)[:2] == b'\037\213':
-                mateFile = gzip.open(mateFile)
-        else:
-            mateFile = None
-        if len(paths) > 1:
-            i = 2 if len(paths) > 2 else 1
-            if not os.path.exists(os.path.dirname(paths[i])):
-                try:
-                    os.makedirs(os.path.dirname(paths[i]))
-                except OSError as e:
-                    if e.errno != errno.EEXIST:
-                        raise
-            if paths[i].endswith('.gz'):
-                outFile = gzip.open(paths[i], 'wb+')
-            else:
-                outFile = open(paths[i], 'wb+')
-        else:
-            outFile = stdout
-        trim(inFile, outFile, mateStream=mateFile, **argmap[trim])
+    for argmap in loadConfig(argv, (trim,), title='Trim V1.0'):
+        trim(**argmap[trim])

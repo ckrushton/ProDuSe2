@@ -47,13 +47,41 @@ def generate(functions: list):
     for func in functions:
         sig = signature(func)
         params = CommentedMap()
-        params.update({param:None for param, _ in sig.parameters})
+        params.update({name:None if param.default == Parameter.empty else param.default for name, param in sig.parameters})
         for match in argDocRegEx.finditer(getdoc(func)):
             params.yaml_add_eol_comment(match.group(2), match.group(1))
         config[func.__name__] = params
     return config
 
+class TransformArg:
+    __slots__ = 'xform'
+
+    def __init__(self, xform=None):
+        if isinstance(xform, tuple) and len(xform) < 3:
+            raise ValueError("xform tuple must be of size 3")
+        self.xform = xform
+        super().__init__()
+
+    def __call__(self, value):
+        if self.xform:
+            args = (value,)
+            if isinstance(self.xform, tuple):
+                if self.xform[1]:
+                    args = self.xform[1] + args
+                if self.xform[2]:
+                    args = args + self.xform[2]
+                return self.xform[0](*args)
+            return self.xform(*args)
+        else:
+            return value
+
 # -- Config file mapping --
+
+class TransformCfg(TransformArg):
+    __slots__ = 'expression'
+    def __init__(self, path, xform=None):
+        super().__init__(xform)
+        self.expression = jmespath.compile(path) if path else None
 
 def ConfigMap(*args, **kwargs):
     def wrap(func):
@@ -63,12 +91,15 @@ def ConfigMap(*args, **kwargs):
             func.__cfgMap__ = {}
         if '_func' in nArgs:
             func.__cfgMap__['_func'] = jmespath.compile(nArgs['_func'])
-        for param in sig.parameters:
-            if param in nArgs:
-                expression = nArgs.get(param)
-                func.__cfgMap__[param] = jmespath.compile(expression) if expression else None
-            elif param not in func.__cfgMap__:
-                func.__cfgMap__[param] = jmespath.compile(param)
+        for name in sig.parameters:
+            if name in nArgs:
+                expression = nArgs.get(name)
+                if isinstance(expression, TransformCfg):
+                    func.__cfgMap__[name] = expression
+                else:
+                    func.__cfgMap__[name] = jmespath.compile(expression) if expression else None
+            elif name not in func.__cfgMap__:
+                func.__cfgMap__[name] = jmespath.compile(name)
 
         return func
     return wrap
@@ -82,11 +113,16 @@ def mapConfig(func, yaml_node, path = None) -> dict:
     sig = signature(func)
     for name, param in sig.parameters.items(): #type: str, Parameter
         if hasattr(func, '__cfgMap__') and name in func.__cfgMap__:
-            expression = func.__cfgMap__[name]
+            if isinstance(func.__cfgMap__[name], TransformCfg):
+                expression = func.__cfgMap__[name].expression
+            else:
+                expression = func.__cfgMap__[name]
             if expression:
                 val = expression.search(yaml_node)
                 if val is None:
                     val = param.default
+                elif isinstance(func.__cfgMap__[name], TransformArg):
+                    val = func.__cfgMap__[name](val)
                 args[name] = val
         else:
             val = yaml_node.get(name, param.default)
@@ -99,6 +135,19 @@ def configUnmapped(func, param: str):
 
 # -- Command line argument mapping --
 
+class PositionalArg(TransformArg):
+    __slots__ = 'index', 'name', 'desc', 'default'
+    def __init__(self, index, name, desc, xform=None):
+        self.index = index
+        self.name = name
+        self.desc = desc
+        self.default = None
+        super().__init__(xform)
+
+    @property
+    def optional(self):
+        return self.default is not Parameter.empty
+
 def ArgMap(*args, **kwargs):
     def wrap(func):
         sig = signature(func)
@@ -107,51 +156,73 @@ def ArgMap(*args, **kwargs):
             func.__argMap__ = {}
         if '_func' in nArgs:
             func.__argMap__['_func'] = nArgs['_func']
-        for param in sig.parameters:
-            if param in nArgs:
-                func.__argMap__[param] = nArgs.get(param) or None
-            #elif param not in func.__argMap__:
-            #    func.__argMap__[param] = param
+        for name, param in sig.parameters.items():
+            if name in nArgs:
+                if isinstance(nArgs[name], PositionalArg) and param.default is not param.empty:
+                    nArgs[name].default = param.default
+                func.__argMap__[name] = nArgs[name] or None
 
         return func
     return wrap
 
-def mapArgs(optList, functions) -> (dict, dict):
+def mapArgs(optList, positionals, functions) -> (dict, dict):
     args = {}
+    pos = [] # Accumulate all positionals from all functions for later processing
     for f in functions:
         sig = signature(f)
-        # Handle _func in argMap
-        prefix = f.__name__ + ':'
-        if hasattr(f, '__argMap__') and '_func' in f.__argMap__ and f.__argMap__['_func'] is not None:
-            prefix = f.__argMap__['_func']
-            if prefix != '':
-                prefix += ':'
-        prefix = '--' + prefix
         args[f] = {}
         for name, param in sig.parameters.items():
-            argName = resolveArgName(f, name)
-            if not argName: continue
-            for opt, val in optList:
-                if opt == '--' + argName:
-                    if issubclass(getTrueAnnotationType(sig.parameters[name].annotation), bool):
-                        val = strtobool(val or 'True')
-                    elif sig.parameters[name].annotation is not Parameter.empty:
-                        val = getTrueAnnotationType(sig.parameters[name].annotation)(val)
-                    args[f][name] = val
-
-        # Handle config path overrides TODO: This should be moved out of this function
-        for opt, val in optList:
-            if opt == prefix:
-                ConfigMap(_func=jmespath.compile(val))(f)
-            elif opt == prefix + name + ':':
-                ConfigMap(**{name:jmespath.compile(val)})(f)
+            positional = resolvePositional(f, name)
+            if positional:
+                pos.append((f, name, positional))
+            else:
+                argName = resolveArgName(f, name)
+                if not argName: continue
+                for opt, val in optList:
+                    if opt == '--' + argName:
+                        if hasattr(f, '__argMap__') and name in f.__argMap__ and isinstance(f.__argMap__[name], TransformArg):
+                            val = f.__argMap__[name](val)
+                        elif issubclass(getTrueAnnotationType(sig.parameters[name].annotation), bool):
+                            val = strtobool(val or 'True')
+                        elif sig.parameters[name].annotation is not Parameter.empty:
+                            val = getTrueAnnotationType(sig.parameters[name].annotation)(val)
+                        args[f][name] = val
+    requiredCount = len({positional.index: True for f, name, positional in pos if not positional.optional})
+    remaining = len(positionals) - requiredCount
+    if remaining < 0:
+        raise ValueError("Expected {} positional arguments, {} found.".format(requiredCount, len(positionals)))
+    for i in range(len(positionals)):
+        for f, name, positional in pos:
+            if positional.index == i:
+                if positional.optional and remaining:
+                    remaining -= 1
+                else:
+                    continue
+                args[f][name] = positional(positionals[i])
     return args
 
-def resolveArgName(func, name):
+def resolvePositional(func, name) -> PositionalArg or None:
+    if hasattr(func, '__argMap__') and name in func.__argMap__ and isinstance(func.__argMap__[name], PositionalArg):
+        return func.__argMap__[name]
+    else:
+        return None
+
+def resolveArgPrefix(function) -> str:
+    # Handle _func in argMap
+    prefix = function.__name__ + ':'
+    if hasattr(function, '__argMap__') and '_func' in function.__argMap__ and function.__argMap__['_func'] is not None:
+        prefix = function.__argMap__['_func']
+        if prefix != '':
+            prefix += ':'
+    return prefix
+
+def resolveArgName(func, name) -> str:
     # Prefix parameter with name if argMap unspecified
     if hasattr(func, '__argMap__'):
         if name in func.__argMap__:
             if func.__argMap__[name]:
+                if isinstance(func.__argMap__[name], PositionalArg):
+                    return func.__argMap__[name].name
                 return func.__argMap__[name]
             else:
                 return None
@@ -263,16 +334,14 @@ def configUI(screen, functions: list, yaml_node, call_name, title=''):
 
 # -- Loader --
 
-def loadConfig(args: list, functions: tuple, title='', positionalDoc: list=[], configParam='config', defaultConfig=None, configExpression = None, paramExpression = None, batchExpression=None) -> (dict, list):
+def loadConfig(argv: list, functions: tuple, title='', positionalDoc: list=[], configParam='config', defaultConfig=None, configExpression = None, batchExpression=None) -> (dict, list):
     if isinstance(configExpression, str):
         configExpression = jmespath.compile(configExpression)
-    if isinstance(paramExpression, str):
-        paramExpression = jmespath.compile(paramExpression)
     if isinstance(batchExpression, str):
         batchExpression = jmespath.compile(batchExpression)
 
-    call_name = args[0]
-    args = args[1:]
+    call_name = argv[0]
+    argv = argv[1:]
     options = [configParam + '=', '{}:='.format(configParam), '{}:params:='.format(configParam), '{}:batch:='.format(configParam)]
     for f in functions:
         # Build command line argument list from function parameters
@@ -284,21 +353,19 @@ def loadConfig(args: list, functions: tuple, title='', positionalDoc: list=[], c
             if not ((issubclass(getTrueAnnotationType(param.annotation), bool) or isinstance(param.default, bool)) and param.default == False):
                 name += '='
             options.append(name)
-    optList, originalParams = gnu_getopt(args, 'h', options)
-    params = originalParams.copy()
+    optList, originalPositionals = gnu_getopt(argv, 'h', options)
 
     # Search for help switch in passed parameters
     for opt, val in optList:
         if opt == '-h':
             from sys import stderr
             import __main__
+            headerString = ''
+            positionalHelp = {} # type: dict[int, PositionalArg]
+            helpString = ''
             try:
-                if title: stderr.write("{}\tUse: {} [options] {}\n{}\n".format(
-                                        title,
-                                        getfile(__main__),
-                                        ' '.join([name for name, _ in positionalDoc]),
-                                        '\n'.join([name + ' - ' + desc for name, desc in positionalDoc if desc])
-                                        ))
+                if title:
+                    headerString = "{}\tUse: {} [options] ".format(title, getfile(__main__))
             except TypeError:
                 pass
             for f in functions:
@@ -310,17 +377,44 @@ def loadConfig(args: list, functions: tuple, title='', positionalDoc: list=[], c
                     stderr.write(funcDocs[0] + '\n')
                 doc = getParamDoc(f)
                 for name, param in sig.parameters.items(): #type:str, Parameter
-                    argName = resolveArgName(f, name)
-                    if not argName: continue
-                    default = ''
-                    if param.default != param.empty:
-                        default = "[Default: {}]".format(param.default)
-                    stderr.write("  --{} - {} {}\n".format(argName, doc.get(name, ''), default))
+                    positional = resolvePositional(f, name)
+                    if positional:
+                        positionalHelp[positional.index] = positional
+                    else:
+                        argName = resolveArgName(f, name)
+                        if not argName: continue
+                        default = ''
+                        if param.default != param.empty:
+                            default = "[Default: {}]".format(param.default)
+                        helpString += "  --{} - {} {}\n".format(argName, doc.get(name, ''), default)
 
-            stderr.write("General:\n  --{} - Path to configuration file. All other specified options override config. " 
-                         "If no config file specified, all options without default must be specified.\n".format(configParam))
+            helpString += "General:\n  --{} - Path to configuration file. All other specified options override config. " \
+                          "If no config file specified, all options without default must be specified.\n".format(configParam)
+            if headerString:
+                positionalNameString = ''
+                positionalDocString = ''
+                try:
+                    for i in range(len(positionalHelp)):
+                        positionalNameString += (" [{}]" if positionalHelp[i].optional else " {}").format(positionalHelp.name)
+                        positionalDocString += "{} - {}\n".format(positionalHelp[i].name, positionalHelp[i].desc)
+                    stderr.write(headerString + positionalNameString + '\n' + positionalDocString + helpString)
+                except KeyError:
+                    raise ValueError("Non-contiguous positional parameter index: {}".format(i))
+            else:
+                stderr.write(helpString)
             exit()
 
+    # Handle config path overrides
+    for f in functions:
+        for name, param in signature(f).parameters.items():
+            prefix = '--' + resolveArgPrefix(f)
+            for opt, val in optList:
+                if opt == prefix:
+                    ConfigMap(_func=jmespath.compile(val))(f)
+                elif opt == prefix + name + ':':
+                    ConfigMap(**{name: jmespath.compile(val)})(f)
+
+    config = None
     # Search for configParam in passed parameters
     for opt, val in optList:
         if opt == '--' + configParam:
@@ -329,45 +423,41 @@ def loadConfig(args: list, functions: tuple, title='', positionalDoc: list=[], c
             for o, v in optList:
                 if o == '--{}:'.format(configParam):
                     configExpression = jmespath.compile(v)
-                elif o == '--{}:params:'.format(configParam):
-                    paramExpression = jmespath.compile(v)
                 elif o == '--{}:batch:'.format(configParam):
                     batchExpression = jmespath.compile(v)
-            overrides = mapArgs(optList, functions)
-            cfgs = ruamel.yaml.load_all(open(val), YAMLLoader)
-            for cfg in cfgs:
-                if configExpression:
-                    tmp = configExpression.search(cfg)
-                    if tmp != None:
-                        cfg = tmp
-                if batchExpression:
-                    jobs = batchExpression.search(cfg)
-                    if jobs == None:
-                        jobs = [cfg]
-                else:
-                    jobs = [cfg]
-                for job in jobs:
-                    if paramExpression:
-                        params = originalParams.copy()
-                        tmp = paramExpression.search(job)
-                        if isinstance(tmp, list):
-                            params += tmp
-                    argMap = {}
-                    for f in functions:
-                        mapping = mapConfig(f, job)
-                        argMap[f] = mapping
-                        validate(f, mapping)
-                    for f, m in overrides.items():
-                        if f not in argMap:
-                            argMap[f] = {}
-                        argMap[f].update(m)
-                    #TODO os.fork() to parallelize jobs
-                    yield argMap, params
-            return
+            config = val
 
-    if len(args):
+    args = mapArgs(optList, originalPositionals, functions)
+    if config:
+        cfgs = ruamel.yaml.load_all(open(config), YAMLLoader)
+        for cfg in cfgs:
+            if configExpression:
+                tmp = configExpression.search(cfg)
+                if tmp != None:
+                    cfg = tmp
+            if batchExpression:
+                jobs = batchExpression.search(cfg)
+                if jobs == None:
+                    jobs = [cfg]
+            else:
+                jobs = [cfg]
+            for job in jobs:
+                argMap = {}
+                for f in functions:
+                    argMap[f] = mapConfig(f, job)
+                for f, m in args.items():
+                    if f not in argMap:
+                        argMap[f] = {}
+                    argMap[f].update(m)
+                for f in functions:
+                    validate(f, argMap[f])
+                #TODO os.fork() to parallelize jobs
+                yield argMap
+        return
+
+    if len(argv):
         # If parameters were passed, skip TUI
-        yield mapArgs(optList, functions), params
+        yield args
         return
     else:
         # No parameters were passed, load TUI

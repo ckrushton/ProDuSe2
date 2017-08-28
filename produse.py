@@ -3,7 +3,7 @@ import sys, os, tempfile, shutil, gzip, selectors, re
 
 from collapse import collapse
 from clip import clip
-from trim import trim
+from trim import trim, openGZ
 
 from multiprocessing import Process
 from subprocess import Popen, PIPE
@@ -65,12 +65,9 @@ def displayVerbose(screen, sel: selectors.DefaultSelector, data, poll):
     label = Widgets.Label("Trim:")
     label.custom_colour = 'section_header'
     layout.add_widget(label)
-    trim1 = Widgets.TextBox(1, name='trim1')
-    trim1.disabled = True
-    trim2 = Widgets.TextBox(1, name='trim2')
-    trim2.disabled = True
-    layout.add_widget(trim1)
-    layout.add_widget(trim2)
+    trim = Widgets.TextBox(1, name='trim')
+    trim.disabled = True
+    layout.add_widget(trim)
     layout.add_widget(Widgets.Divider(False))
 
     #BWA
@@ -143,12 +140,8 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, output: str, bwa: Execu
     debugPipes = []
 
     # Check if fastqs gzipped
-    inFile1 = open(fastq1, 'rb')
-    if inFile1.peek(2)[:2] == b'\037\213':
-        inFile1 = gzip.open(inFile1)
-    inFile2 = open(fastq2, 'rb')
-    if inFile2.peek(2)[:2] == b'\037\213':
-        inFile2 = gzip.open(inFile2)
+    inFile1 = openGZ(fastq1, 'rb')
+    inFile2 = openGZ(fastq2, 'rb')
 
     # Start bwa subprocess
     if verbose: stderr.write("Starting BWA subprocess..\n")
@@ -162,7 +155,8 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, output: str, bwa: Execu
         os.set_inheritable(w, True)
         debugPipes.append(open(r, 'rb'))
     trimOut = open(trimOutPath, 'wb')
-    trimProc = Process(target=trim, args=(inFile1, trimOut), kwargs=dict(mateStream=inFile2, **config[trim], logStream=open(w if verbose else os.devnull, 'w', buffering=1)))
+    config[trim].update(dict(inStream=inFile1, mateStream=inFile2, outStream=trimOut, logStream=open(w if verbose else os.devnull, 'w', buffering=1)))
+    trimProc = Process(target=trim, kwargs=config[trim])
     trimProc.start()
     trimOut.close()
 
@@ -195,17 +189,18 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, output: str, bwa: Execu
         r, w = os.pipe()
         os.set_inheritable(w, True)
         debugPipes.append(open(r, 'rb'))
-    collapseProc = Process(target=collapse, kwargs=dict(inStream=sort.stdout, outStream=open(output, 'wb+'), **config[collapse], logStream=open(w if verbose else os.devnull, 'w', buffering=1)))
+    config[collapse].update(dict(inStream=sort.stdout, outStream=open(output, 'wb+'), logStream=open(w if verbose else os.devnull, 'w', buffering=1)))
+    collapseProc = Process(target=collapse, kwargs=config[collapse])
     collapseProc.start()
     sort.stdout.close()
 
     if verbose:
         from collections import OrderedDict
         sel = selectors.DefaultSelector()
-        lineBuffers = [('trim1', ['']), ('trim2', ['']), ('bwa', ['' for _ in range(10)]), ('clip', ['']), ('collapse', [''])]
+        lineBuffers = [('trim', ['']), ('bwa', ['' for _ in range(10)]), ('clip', ['']), ('collapse', [''])]
         for i in range(len(debugPipes)):
             sel.register(debugPipes[i], selectors.EVENT_READ, lineBuffers[i][1])
-        poll = lambda : trimProc.is_alive() or clipProc.is_alive() or bwa.poll() or sort.poll() #or collapseProc.is_alive()
+        poll = lambda : trimProc.is_alive() or clipProc.is_alive() or bwa.poll() or sort.poll() or collapseProc.is_alive()
         from asciimatics.screen import Screen
         from asciimatics.exceptions import ResizeScreenError, StopApplication
         # Handle screen resize by rebuilding screen
@@ -229,11 +224,18 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, output: str, bwa: Execu
     shutil.rmtree(temp_dir)
 
 if __name__ == "__main__":
-    ConfigMap(_func='trim', verbose=None)(trim)
-    ConfigMap(_func='collapse', verbose=None)(collapse)
-    ArgMap(_func=trim.__name__, verbose='verbose')(trim)
-    ArgMap(_func=collapse.__name__, verbose='verbose')(collapse)
-    for argmap, params in loadConfig(sys.argv, (ProDuSe, trim, collapse), batchExpression='samples'):
-        global config
-        config = argmap
-        ProDuSe(**argmap[ProDuSe])
+    ConfigMap(_func='trim', verbose=None, logStream=None)(trim)
+    ConfigMap(_func='collapse', verbose=None, logStream=None)(collapse)
+    ArgMap(_func=trim.__name__, verbose='verbose', logStream=None)(trim)
+    ArgMap(_func=collapse.__name__, verbose='verbose', logStream=None)(collapse)
+    cfgs = loadConfig(sys.argv, (ProDuSe, trim, collapse), batchExpression='samples')
+    global config
+    while True:
+        try:
+            argmap = next(cfgs)
+            config = argmap
+            ProDuSe(**argmap[ProDuSe])
+        except ValueError:
+            continue
+        except StopIteration:
+            break
