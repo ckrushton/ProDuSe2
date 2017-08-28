@@ -50,8 +50,8 @@ class FastqRecord(object):
             self.seq = ""
             self.qual = ""
             return
-        self.seq = self.seq[left:-right]
-        self.qual = self.qual[left:-right]
+        self.seq = self.seq[left:-right or None]
+        self.qual = self.qual[left:-right or None]
 
     def write(self, stream: io.IOBase):
         stream.writelines([b'@', self.name.encode('ascii'), b' ' + self.desc1.encode('ascii') if self.desc1 != '' else '', b'\n',
