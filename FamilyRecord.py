@@ -62,7 +62,7 @@ class FamilyRecord:
             startPos = record.reference_start
         recordItr = CigarIterator(record)
         recordItr.skipClipped()
-        i = startPos - record.reference_start
+        i = record.reference_start - startPos
         while recordItr.valid:
             while i >= len(self.cols):
                 self.cols.append({})
