@@ -9,7 +9,7 @@ from CigarIterator import CigarIterator, appendOrInc
 import multiprocessing, ctypes, io
 import parapysam
 
-default_cost = {
+default_cost = { # Default costs to use when evaluating alignments
     pysam.CMATCH: lambda x: -x,
     pysam.CEQUAL: lambda x: -x,
     pysam.CDIFF: lambda x: -x,
@@ -19,6 +19,14 @@ default_cost = {
 }
 
 def calculateAlignmentCost(record: pysam.AlignedSegment, start: int = 0, end: int = maxsize, costs = default_cost) -> int:
+    """
+    Calculates the alignment cost of a record.
+    :param record: The record to evaluate
+    :param start: The start position in cigar space to begin the calculation.
+    :param end: The end position in cigar space to end the calculation.
+    :param costs: A dictionary mapping op codes to functions that take a single argument of the operation length and returns the cost.
+    :return: The total cost of the alignment over the specified range
+    """
     cost = 0
     if start < record.reference_start:
         start = record.reference_start
@@ -38,10 +46,24 @@ def calculateAlignmentCost(record: pysam.AlignedSegment, start: int = 0, end: in
     return cost
 
 def calculateMappingQuality(record: pysam.AlignedSegment) -> int:
+    """
+    Calculate the mapping quality of the record.
+    Currently only returns the current mapping quality as a new one would obfuscate the success of the aligner.
+    :param record: The record to calculate the mapping quality
+    :return: The mapping quality of the record.
+    """
     # Mapping quality isn't updated as it reflects the quality of the original alignment
     return record.mapping_quality
 
-def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: int = 0, end: int = maxsize):
+def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: int = 0, end: int = maxsize) -> None:
+    """
+    Soft clip the ends of a record.
+    :param record: The record to soft clip
+    :param mate: The records mate if applicable or None
+    :param start: The start coordinate in reference space of the region of the record to retain.
+    :param end: The end coordinate in reference space of the region to retain.
+    :return: None
+    """
     if start <= record.reference_start and end >= record.reference_end-1:
         # No work needs to be done
         return
@@ -97,9 +119,21 @@ def trimRecord(record: pysam.AlignedSegment, mate: pysam.AlignedSegment, start: 
         record.reference_start = nextMatch
     record.mapping_quality = calculateMappingQuality(record)
     # TODO rewrite MD
-    mate.next_reference_start = record.reference_start
+    if mate: mate.next_reference_start = record.reference_start
 
-def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment, refStart: int = -1, refEnd: int = maxsize, costs = default_cost) -> list:
+def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment, refStart: int = -1, refEnd: int = maxsize, costs = default_cost) -> None:
+    """
+    Merge the operations of the overlapping region from one record into another. If there is a mismatch of operations at a position between the
+    records then the cheapest alignment will be retained.
+    :param fromRecord: The record to copy the operations from.
+    :param toRecord: The record to copy the operations to.
+    :param refStart: The start position of the region to merge in reference space.
+                     Will snap to the beginning of the overlapping region if the coordinate is outside of the overlap.
+    :param refEnd: The end position of the region to merge in reference space.
+                    Will snap to the end of the overlapping region if the coordinate is outside of the overlap.
+    :param costs: The cost map to pass to :func:`calculateAlignmentCost`
+    :return: None
+    """
     overlapStart = fromRecord.reference_start if fromRecord.reference_start > toRecord.reference_start else toRecord.reference_start
     overlapEnd = (fromRecord.reference_end if fromRecord.reference_end < toRecord.reference_end else toRecord.reference_end) - 1
 
@@ -185,13 +219,26 @@ def mergeRecord(fromRecord: pysam.AlignedSegment, toRecord: pysam.AlignedSegment
     # TODO Store tag for which strand the base originated from
 
 class WorkerProcess(parapysam.OrderedWorker):
-    def __init__(self, alternate, clipOnly, trimTail):
+    """
+    Worker process that trims and merges records.
+    """
+    def __init__(self, alternate=False, clipOnly=False, trimTail=False):
+        """
+        Constructor.
+        :param alternate: Set to True to clip trailing mate rather than the first. Use this to try and avoid strand bias.
+        :param clipOnly: Set to True to only clip, skipping the merge step.
+        :param trimTail: Set to True to trim the tail of the mate record sticking out past the beginning/end of its mate. Use this to remove possible barcode remnants.
+        """
         self.alternate = alternate
         self.clipOnly = clipOnly
         self.trimTail = trimTail
         super().__init__()
 
-    def work(self):
+    def work(self) -> None:
+        """
+        Called by super class to begin work.
+        :return: None
+        """
         try:
             firstRecord = self.receiveRecord()
             secondRecord = self.receiveRecord()
@@ -258,7 +305,18 @@ class WorkerProcess(parapysam.OrderedWorker):
             pass
 
 class WriterProcess(parapysam.OrderedWorker):
-    def __init__(self, outFH, outFormat, pool, ordered, maxTLen):
+    """
+    Writer process that recieves records from worker processes and writes them out.
+    """
+    def __init__(self, outFH, outFormat, pool, ordered=False):
+        """
+        Constructor.
+        :param outFH: An open file handle to the output file
+        :param outFormat: The mode parameter to pass to pysam to determine the output format. Exclude the 'w', it will be prepended.
+                          See http://pysam.readthedocs.io/en/latest/api.html#sam-bam-files
+        :param pool: A list of the worker processes to read from.
+        :param ordered: Set to True to maintain input order, set to 'c' to maintain coordinate order.
+        """
         super().__init__()
         self.pool = pool
         self.ordered = ordered
@@ -266,9 +324,12 @@ class WriterProcess(parapysam.OrderedWorker):
         self.outFormat = outFormat
         self.nextIndex = multiprocessing.RawValue(ctypes.c_long, 0)
         self.bufferedCount = multiprocessing.RawValue(ctypes.c_long, 0)
-        self.maxTLen = maxTLen
 
-    def work(self):
+    def work(self) -> None:
+        """
+        Called by super class to begin work.
+        :return: None
+        """
         outFile = pysam.AlignmentFile(self.outFH, 'w' + self.outFormat, header=self.header)
         if self.ordered:
             self.writeOrdered(outFile)
@@ -276,13 +337,18 @@ class WriterProcess(parapysam.OrderedWorker):
             self.write(outFile)
         outFile.close()
 
-    def stop(self):
+    def stop(self) -> None:
         super().stop(False)
         for p in self.pool:
             p.stop()
         self.join()
 
-    def writeOrdered(self, outFile):
+    def writeOrdered(self, outFile: pysam.AlignedSegment) -> None:
+        """
+        Writes output ordered based on :attr:`self.ordered`
+        :param outFile: An open pysam.AlignmentFile instance wrapping the output file
+        :return: None
+        """
         import heapq
         class HeapNode:
             __slots__ = 'key', 'value'
@@ -329,7 +395,12 @@ class WriterProcess(parapysam.OrderedWorker):
             if self.ordered != 'c': self.nextIndex.value += 1
             outFile.write(result.value[1])
 
-    def write(self, outFile):
+    def write(self, outFile: pysam.AlignedSegment) -> None:
+        """
+        Writes records out as they are completed, irrespective of input order.
+        :param outFile: An open pysam.AlignmentFile instance wrapping the output file
+        :return: None
+        """
         running = True
         while running:
             running = False
@@ -342,7 +413,7 @@ class WriterProcess(parapysam.OrderedWorker):
                 self.nextIndex.value, record = p.receiveOrderedRecord()
                 outFile.write(record)
 
-def status(mateCount, bufferedCount, nextIndex, logStream: io.IOBase = stderr):
+def _status(mateCount, bufferedCount, nextIndex, logStream: io.IOBase = stderr):
     import time
     logStream.write("\n") # This will be deleted by the next write
     while True:
@@ -350,7 +421,23 @@ def status(mateCount, bufferedCount, nextIndex, logStream: io.IOBase = stderr):
         logStream.write(status)
         time.sleep(0.2)
 
-def clip(inStream: io.IOBase, outStream: io.IOBase, threads: int = 8, maxTLen: int = 1000, outFormat:str = 'bu', ordered=False, alternate=False, clipOnly=False, trimTail=False, verbose=False, logStream: io.IOBase=stderr):
+def clip(inStream: io.IOBase, outStream: io.IOBase, threads: int = 8, maxTLen: int = 1000, outFormat:str = 'bu', ordered=False, alternate=False, clipOnly=False, trimTail=False, verbose=False, logStream: io.IOBase=stderr) -> None:
+    """
+    Clips all overlapping records from inStream, writing to outstream.
+    :param inStream: An open file object pointing to the input file
+    :param outStream: An open file object pointing to the output file
+    :param threads: The number of worker subprocesses to use. Will reduce to even number if alternate=True.
+    :param maxTLen: The maximum expected template length between two mates. If mates exceed this they will not be clipped.
+    :param outFormat: The mode parameter to pass to pysam to determine the output format. Exclude the 'w', it will be prepended.
+                          See http://pysam.readthedocs.io/en/latest/api.html#sam-bam-files
+    :param ordered: Set to True to maintain input order.
+    :param alternate: Set to True to clip trailing mate rather than the first. Use this to try and avoid strand bias.
+    :param clipOnly: Set to True to only clip, skipping the merge step.
+    :param trimTail: Set to True to trim the tail of the mate record sticking out past the beginning/end of its mate. Use this to remove possible barcode remnants.
+    :param verbose: Set to True to output status information.
+    :param logStream: An open file object to output status information to.
+    :return:
+    """
     pool = []
     mateBuffer = {}
     inFile = pysam.AlignmentFile(inStream)
@@ -368,7 +455,7 @@ def clip(inStream: io.IOBase, outStream: io.IOBase, threads: int = 8, maxTLen: i
         worker.start(inFile.header)
         pool.append(worker)
 
-    writer = WriterProcess(outStream, outFormat, pool, 'c' if (alternate or trimTail) and ordered else ordered, maxTLen)
+    writer = WriterProcess(outStream, outFormat, pool, 'c' if (alternate or trimTail) and ordered else ordered)
     writer.start(inFile.header)
 
     def poolLooper():
@@ -379,14 +466,19 @@ def clip(inStream: io.IOBase, outStream: io.IOBase, threads: int = 8, maxTLen: i
     poolLoop = poolLooper()
     mateCount = multiprocessing.RawValue(ctypes.c_long, 0)
 
-    statusProc = multiprocessing.Process(target=status, args=(mateCount, writer.bufferedCount, writer.nextIndex, logStream))
+    statusProc = multiprocessing.Process(target=_status, args=(mateCount, writer.bufferedCount, writer.nextIndex, logStream))
     if verbose:
         statusProc.start()
 
     i = 0  # Tracks the order the records were read
     for record in inFileItr:
         # Skip clipping code if the records don't overlap
-        if not record.is_unmapped and not record.mate_is_unmapped and not record.is_supplementary and record.is_paired and abs(record.template_length) < maxTLen and record.reference_name == record.next_reference_name: #record.reference_start - maxTLen < record.next_reference_start < record.reference_end:
+        if not record.is_unmapped \
+                and not record.mate_is_unmapped \
+                and not record.is_supplementary \
+                and record.is_paired \
+                and abs(record.template_length) < maxTLen \
+                and record.reference_name == record.next_reference_name:
             secondRecord = mateBuffer.get(record.query_name, None)
             if not secondRecord:
                 mateBuffer[record.query_name] = (i, record)

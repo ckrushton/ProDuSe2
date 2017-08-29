@@ -151,7 +151,7 @@ class Families:
             graph = nx.empty_graph(len(pos)) #type: nx.Graph
             for node, data in graph.nodes_iter(True):
                 data['weight'] = pos[keys[node]].size
-            # TODO ensure families are seperated by strand threshold and F/R
+
             for u, v in itertools.combinations(range(len(pos)), 2):
                 # Keep families with F/R separate
                 if keys[u][0] != keys[v][0]: continue
@@ -354,6 +354,6 @@ if __name__ == "__main__":
             argmap = next(cfgs)
             collapse(**argmap[collapse])
         except ValueError:
-            continue
+            continue # TODO add verbose output
         except StopIteration:
             break

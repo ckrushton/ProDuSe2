@@ -8,6 +8,12 @@ class FastqRecord(object):
         self.name, self.desc1, self.seq, self.desc2, self.qual = "","","","",""
     
     def read(self, stream:io.IOBase, SAMify:bool = True) -> bool:
+        """
+        Read data into this object
+        :param stream:
+        :param SAMify:
+        :return:
+        """
         line1 = ' '
         while line1.isspace():  # Ignore white space
             line1 = stream.readline().decode('ascii')

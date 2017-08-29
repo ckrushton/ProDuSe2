@@ -5,36 +5,54 @@ import FastqRecord
 from configutator import ConfigMap, ArgMap, PositionalArg, TransformCfg
 
 IUPACCodeDict = {
-    'A' : ['A'],    #Adenine
-    'C'	: ['C'],    #Cytosine
-    'G'	: ['G'],    #Guanine
-    'T' : ['T', 'U'],    #Thymine
-    'U' : ['T', 'U'],    #Uracil
-    'R' : ['A', 'G'],    #A or G
-    'Y' : ['C', 'T'],	#C or T
-    'S' : ['G', 'C'],	#G or C
-    'W' : ['A', 'T'],	#A or T
-    'K' : ['G', 'T'],	#G or T
-    'M' : ['A', 'C'],	#A or C
-    'B' : ['C', 'G', 'T'],	#C or G or T
-    'D' : ['A', 'G', 'T'],	#A or G or T
-    'H' : ['A', 'C', 'T'],	#A or C or T
-    'V' : ['A', 'C', 'G'],	#A or C or G
-    'N' : ['A','C','G','T','U','R','Y','S','W','K','M','B','D','H','V','N'],	#any base
-    '.' : ['.', '-'],    #gap
-    '-' : ['.', '-']     #gap
+    'A' : 'A',    #Adenine
+    'C'	: 'C',    #Cytosine
+    'G'	: 'G',    #Guanine
+    'T' : 'TU',    #Thymine
+    'U' : 'TU',    #Uracil
+    'R' : 'AG',    #A or G
+    'Y' : 'CT',	#C or T
+    'S' : 'GC',	#G or C
+    'W' : 'AT',	#A or T
+    'K' : 'GT',	#G or T
+    'M' : 'AC',	#A or C
+    'B' : 'CGT',	#C or G or T
+    'D' : 'AGT',	#A or G or T
+    'H' : 'ACT',	#A or C or T
+    'V' : 'ACG',	#A or C or G
+    'N' : 'ACGTURYSWKMBDHVN',	#any base
+    '.' : '.-',    #gap
+    '-' : '.-'     #gap
 }
 
 def IUPACMatch(code1: str, code2: str) -> bool:
+    """
+    Compares two IUPAC nucleotide codes and returns if code2 is within the IUPAC specified range of code1
+    :param code1: IUPAC nucleotide code
+    :param code2: IUPAC nucleotide code
+    :return: True if the codes are within the specified range, False otherwise
+    """
     return code2 in IUPACCodeDict[code1]
 
-def openGZ(path, mode):
+def openGZ(path: str, mode: str):
+    """
+    Open a possibly gzipped file. Checks magic bytes at beginning of file to determine compression.
+    :param path: Path to file to open
+    :param mode: Mode to open file in (same as open() paramater)
+    :return: A open file object, similar to open()
+    """
     fh = open(path, mode)
     if fh.peek(2)[:2] == b'\037\213':
         fh = gzip.open(fh)
     return fh
 
-def createAndOpen(path, mode):
+def createAndOpen(path: str, mode: str):
+    """
+    Open a file, creating the full directory path to the file if necessary.
+    :param path: Path to file to open
+    :param mode: Mode to open file in (same as open() paramater)
+    :return: A open file object, similar to open()
+    """
     if not os.path.exists(os.path.dirname(path)):
         try:
             os.makedirs(os.path.dirname(path))
@@ -67,11 +85,12 @@ def trim(barcode_distance: int, barcode_sequence: str, reverse: bool = False, in
     if mated:
         record2 = FastqRecord.FastqRecord()
     invert = False
-    count = 0
-    discard = 0
+    count = 0 # Record counter
+    discard = 0 # Discarded records counter
     if barcode_distance < 0:
         invert = True
         barcode_distance *= -1
+
     while record1.read(inStream) and (not mated or record2.read(mateStream)):
         if verbose:
             logStream.write("\x1b[F\x1b[2K\r{file}\tWorking on record: {record}\tRecords processed: {total}\n".format(file=outStream.name if hasattr(outStream, 'name') else 'Streaming', record=record1.name, total=count))
@@ -85,6 +104,7 @@ def trim(barcode_distance: int, barcode_sequence: str, reverse: bool = False, in
         record1.desc1 += '\tBC:Z:' + barcode1 + barcode2
         if mated:
             record2.desc1 += '\tBC:Z:' + barcode2 + barcode1
+
         for record, barcode in ((record1, barcode1), (record2, barcode2)) if mated else ((record1, barcode1)):
             mismatch = 0
             mismatch += sum(not IUPACMatch(bc, sq) for bc, sq in zip(barcode_sequence, reversed(barcode) if reverse else barcode))
@@ -98,6 +118,7 @@ def trim(barcode_distance: int, barcode_sequence: str, reverse: bool = False, in
             else:
                 record.trim(0 if reverse else len(barcode_sequence), len(barcode_sequence) if reverse else 0)
             record.write(outStream)
+
     if verbose:
         logStream.write("\x1b[F\x1b[2K\r{file}\tTotal records: {total}\tRecords discarded: {discard}\n".format(file=outStream.name if hasattr(outStream, 'name') else 'Streaming', total=count, discard=discard))
     outStream.close()
@@ -107,5 +128,14 @@ if __name__ == "__main__":
     from sys import stdout, stdin, argv
     import os, errno
     from configutator import loadConfig
-    for argmap in loadConfig(argv, (trim,), title='Trim V1.0'):
-        trim(**argmap[trim])
+
+    cfgs = loadConfig(argv, (trim,), title="Trim V1.0")
+    while True:  # Skip missing inputs
+        try:
+            argmap = next(cfgs)
+            trim(**argmap[trim])
+        except ValueError:
+            continue # TODO add verbose output
+        except StopIteration:
+            break
+

@@ -139,8 +139,8 @@ class PositionalArg(TransformArg):
     __slots__ = 'index', 'name', 'desc', 'default'
     def __init__(self, index, name, desc, xform=None):
         self.index = index
-        self.name = name
-        self.desc = desc
+        self.name = name # TODO use function param name if None
+        self.desc = desc # TODO use function doc if None
         self.default = None
         super().__init__(xform)
 
@@ -395,7 +395,7 @@ def loadConfig(argv: list, functions: tuple, title='', positionalDoc: list=[], c
                 positionalDocString = ''
                 try:
                     for i in range(len(positionalHelp)):
-                        positionalNameString += (" [{}]" if positionalHelp[i].optional else " {}").format(positionalHelp.name)
+                        positionalNameString += (" [{}]" if positionalHelp[i].optional else " {}").format(positionalHelp[i].name)
                         positionalDocString += "{} - {}\n".format(positionalHelp[i].name, positionalHelp[i].desc)
                     stderr.write(headerString + positionalNameString + '\n' + positionalDocString + helpString)
                 except KeyError:
