@@ -36,10 +36,10 @@ class FamilyRecord:
         self.cols = []
         self.maxMapQ = 0
         self.members = []
-        self.mate = None #type: FamilyRecord
+        self.mate = None # Set later by :meth:`Families.setMate` #type: FamilyRecord
         self.barcode = barcode
-        self.refID = record.reference_id
-        self.forwardCounter = 0
+        self.refID = record.reference_id # Chromosome reference ID
+        self.forwardCounter = 0 # The total number of forward reads aggregated minus the total number of reverse reads aggregated
         self.aggregate(record)
 
     def getOpsAt(self, pos: int):
@@ -64,18 +64,14 @@ class FamilyRecord:
         recordItr.skipClipped()
         i = startPos - record.reference_start
         while recordItr.valid:
-            if len(self.cols) <= i:
-                op = self.Op(recordItr.op, recordItr.seqBase)
+            while i >= len(self.cols):
+                self.cols.append({})
+
+            op = self.cols[i].get((recordItr.op, recordItr.seqBase))
+            if op:
                 op += recordItr.baseQual or 0
-                pos = {}
-                pos[(op.op, op.allele)] = op
-                self.cols.append(pos)
             else:
-                op = self.cols[i].get((recordItr.op, recordItr.seqBase))
-                if op:
-                    op += recordItr.baseQual or 0
-                else:
-                    self.cols[i][(recordItr.op, recordItr.seqBase)] = self.Op(recordItr.op, recordItr.seqBase)
+                self.cols[i][(recordItr.op, recordItr.seqBase)] = self.Op(recordItr.op, recordItr.seqBase)
             i += 1
             recordItr.next()
         self.members.append(record.query_name)
@@ -120,6 +116,7 @@ class FamilyRecord:
         qual = None
         fC = None
         fQ = None
+        #TODO Realign indels for better collapse
         for op in colOps:
             totalN += op.count
             totalQ += op.qSum

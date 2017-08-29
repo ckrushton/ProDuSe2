@@ -371,10 +371,10 @@ def loadConfig(argv: list, functions: tuple, title='', positionalDoc: list=[], c
             for f in functions:
                 # Build command line argument option descriptions from function parameters
                 sig = signature(f)
-                if len(functions) > 1: stderr.write("{}:\n".format(f.__name__))
+                if len(functions) > 1: helpString += "{}:\n".format(f.__name__)
                 funcDocs = funcDocRegex.findall(getdoc(f))
                 if len(funcDocs):
-                    stderr.write(funcDocs[0] + '\n')
+                    helpString += funcDocs[0] + '\n'
                 doc = getParamDoc(f)
                 for name, param in sig.parameters.items(): #type:str, Parameter
                     positional = resolvePositional(f, name)
