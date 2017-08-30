@@ -4,7 +4,7 @@ import math
 try:
     from CigarIterator import CigarIterator, appendOrInc
 # If installed
-except ModuleNotFoundError:
+except ImportError:
     from ProDuSe.CigarIterator import CigarIterator, appendOrInc
 
 class FamilyRecord:
