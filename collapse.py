@@ -150,7 +150,7 @@ class Families:
             keys = list(pos.keys())
             graph = nx.empty_graph(len(pos)) #type: nx.Graph
             for node, data in graph.nodes_iter(True):
-                data['weight'] = pos[keys[node]].size
+                data['weight'] = len(pos[keys[node]])
 
             for u, v in itertools.combinations(range(len(pos)), 2):
                 # Keep families with F/R separate

@@ -10,9 +10,9 @@ class FastqRecord(object):
     def read(self, stream:io.IOBase, SAMify:bool = True) -> bool:
         """
         Read data into this object
-        :param stream:
-        :param SAMify:
-        :return:
+        :param stream: The file object to read data from
+        :param SAMify: Set to true to prepend any data in the description with 'CO:Z:' to allow for valid SAM records when forwarded by the aligner
+        :return: True if successfully read data, False otherwise
         """
         line1 = ' '
         while line1.isspace():  # Ignore white space
@@ -40,15 +40,25 @@ class FastqRecord(object):
                 self.desc1 = "CO:Z:" + self.desc2
         return True
     
-    def clip(self, start: int, stop: int):
-        "Clip a range from the sequence and quality strings"
+    def clip(self, start: int, stop: int) -> None:
+        """
+        Clip a range from the sequence and quality strings
+        :param start: The start position to remove
+        :param stop: The end position to remove
+        :return: None
+        """
         if start < 0: start = 0
         if stop >= len(self.seq): stop = len(self.seq)-1
         self.seq = self.seq[:start] + self.seq[stop:]
         self.qual = self.qual[:start] + self.qual[stop:]
 
-    def trim(self, left: int, right: int):
-        "Cut left# bases from the beginning of the sequence and quality string, and right# bases from the end"
+    def trim(self, left: int, right: int) -> None:
+        """
+        Cut left# bases from the beginning of the sequence and quality string, and right# bases from the end
+        :param left: The quantity of bases to remove from the beginning of the record
+        :param right: The quantity of bases to remove from the end of the record
+        :return: None
+        """
         if left < 0: left=0
         if right < 0: right=0
         if left >= len(self.seq) or right >= len(self.seq):
@@ -58,7 +68,12 @@ class FastqRecord(object):
         self.seq = self.seq[left:-right or None]
         self.qual = self.qual[left:-right or None]
 
-    def write(self, stream: io.IOBase):
+    def write(self, stream: io.IOBase) -> None:
+        """
+        Write the record data to a file
+        :param stream: A open file object to write to
+        :return: None
+        """
         stream.writelines([b'@', self.name.encode('ascii'), b' ' + self.desc1.encode('ascii') if self.desc1 != '' else '', b'\n',
                           self.seq.encode('ascii'), b'\n',
                            b'+ ' + self.desc2.encode('ascii') if self.desc2 != '' else b'+', b'\n',

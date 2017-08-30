@@ -1,4 +1,4 @@
-import re, os, pickle, sys
+import re, os, pickle
 from getopt import gnu_getopt
 from inspect import signature, getdoc, getfile, Parameter
 
@@ -9,7 +9,7 @@ import ruamel.yaml
 from ruamel.yaml.comments import CommentedMap
 import jmespath
 
-from asciimatics.screen import Screen, StopApplication, NextScene
+from asciimatics.screen import Screen, StopApplication
 from asciimatics.scene import Scene
 import asciimatics.widgets as Widgets
 from asciimatics.event import KeyboardEvent
@@ -20,9 +20,19 @@ funcDocRegex = re.compile(r'^[^:]+?(?=[\s]*:[\w]+)')
 argDocRegEx = re.compile(r':param ([^:]+):[\t ]*(.+)$', flags=re.MULTILINE)
 
 def getParamDoc(func) -> dict:
+    """
+    Helper to parse out parameter documentation using :data:`argDocRegEx`
+    :param func: The function to retrieve the docstring using :func:`inspect.getdoc`
+    :return: dictionary of documentation keyed on parameter name
+    """
     return {match.group(1): match.group(2) for match in argDocRegEx.finditer(getdoc(func) or "")}
 
 def getTrueAnnotationType(annotation):
+    """
+    Resolve the supertype of an annotation type possibly created using the typing module.
+    :param annotation: A type object.
+    :return: The original object or its supertype.
+    """
     return getattr(annotation, '__supertype__', annotation)
 
 def strtobool(val: str) -> bool:
@@ -42,7 +52,12 @@ def strtobool(val: str) -> bool:
     else:
         raise ValueError("invalid truth value %r" % (val,))
 
-def generate(functions: list):
+def generate(functions: list) -> dict:
+    """
+    Attempt to create a configuration yaml node for a list of functions.
+    :param functions: List of functions to create a config for.
+    :return: dictionary of required config parameters
+    """
     config = {}
     for func in functions:
         sig = signature(func)
@@ -54,9 +69,18 @@ def generate(functions: list):
     return config
 
 class TransformArg:
+    """
+    Used to transform argument values to the intended type
+    """
     __slots__ = 'xform'
-
     def __init__(self, xform=None):
+        """
+        Constructor.
+        :param xform: A single parameter function that accepts the passed argument string or a three element tuple.
+                      The tuple must be of the form (function, tuple with arguments or None, tuple with arguments or None).
+                      The value is passed to the function wrapped between the values specified in the second and third tuples.
+                      ie. xform=(open, None, 'w+')
+        """
         if isinstance(xform, tuple) and len(xform) < 3:
             raise ValueError("xform tuple must be of size 3")
         self.xform = xform
@@ -78,12 +102,29 @@ class TransformArg:
 # -- Config file mapping --
 
 class TransformCfg(TransformArg):
+    """
+    Extends :class:`TransformArg` to handle JMESPath expressions for config mapping
+    """
     __slots__ = 'expression'
-    def __init__(self, path, xform=None):
+    def __init__(self, path: str, xform=None):
+        """
+
+        :param path: A valid JMESPath that returns the intended config value
+        :param xform: See :meth:`TransformArg.__init__`
+        """
         super().__init__(xform)
         self.expression = jmespath.compile(path) if path else None
 
 def ConfigMap(*args, **kwargs):
+    """
+    Function decorator that specifies parameter mappings to a yaml structure.
+    The values of the arguments should either be a string with a JMESPath expression mapping to the intended config node,
+    None to have configutator ignore the parameter when mapping, or a :class:`TransformCfg` instance.
+    Gives the decorated function object a __cfgMap__ attribute.
+    :param args: Positional arguments that coincide with the arguments of the function to decorate.
+    :param kwargs: Keyword arguments that coincide with the arguments of the function to decorate. This will override anything conflicting with args.
+    :return: A function that will add the specified mappings to the function passed to its single argument.
+    """
     def wrap(func):
         sig = signature(func)
         nArgs = normaliseArgs(func, args, kwargs)
@@ -105,6 +146,13 @@ def ConfigMap(*args, **kwargs):
     return wrap
 
 def mapConfig(func, yaml_node, path = None) -> dict:
+    """
+    Maps yaml configuration nodes to the specified functions parameters.
+    :param func: The function to map its parameters. Should have been decorated by @ConfigMap, if not will default to function variable names as the JMESPath expression.
+    :param yaml_node: The root yaml node to search.
+    :param path: If specified, will override the functions '_func' property specified by @ConfigMap.
+    :return: A dict keyed on the func's parameter names with the values found in the passed yaml node.
+    """
     if path:
         yaml_node = yaml_node.get(path, yaml_node)
     elif hasattr(func, '__cfgMap__') and '_func' in func.__cfgMap__:
@@ -131,13 +179,29 @@ def mapConfig(func, yaml_node, path = None) -> dict:
     return args
 
 def configUnmapped(func, param: str):
+    """
+    Helper to determine if a parameter mapping was set to None.
+    :param func: The function to check.
+    :param param: The parameter name to check.
+    :return: True if the parameter mapping was set to none.
+    """
     return hasattr(func, '__cfgMap__') and param in func.__cfgMap__ and func.__cfgMap__[param] is None
 
 # -- Command line argument mapping --
 
 class PositionalArg(TransformArg):
+    """
+    Extends :class:`TransformArg` to allow mapping to positional command line arguments.
+    """
     __slots__ = 'index', 'name', 'desc', 'default'
-    def __init__(self, index, name, desc, xform=None):
+    def __init__(self, index: int, name: str = None, desc: str = None, xform = None):
+        """
+        Constructor.
+        :param index: The 0-indexed position of the command line parameter.
+        :param name: The name of the command line parameter to display in the help.
+        :param desc: The description of the parameter to display in the help.
+        :param xform: See :meth:`TransformArg.__init__`
+        """
         self.index = index
         self.name = name # TODO use function param name if None
         self.desc = desc # TODO use function doc if None
@@ -146,9 +210,24 @@ class PositionalArg(TransformArg):
 
     @property
     def optional(self):
+        """
+        Determines if a default value was specified in the function definition.
+        Depends on @ArgMap to set the :attr:`default` attribute of this object.
+        :return: True if a default value was set, false otherwise.
+        """
         return self.default is not Parameter.empty
 
 def ArgMap(*args, **kwargs):
+    """
+    Function decorator that specifies parameter mappings to command line parameters.
+    The values of the arguments should either be a string with the command line parameter name,
+    None to have configutator ignore the parameter when mapping, or a :class:`TransformArg` instance.
+    Pass "_func='prefix'" as an argument to specify the prefix to use for the command line arguments.
+    Gives the decorated function object an __argMap__ attribute.
+    :param args: Positional arguments that coincide with the arguments of the function to decorate.
+    :param kwargs: Keyword arguments that coincide with the arguments of the function to decorate. This will override anything conflicting with args.
+    :return: A function that will add the specified mappings to the function passed to its single argument.
+    """
     def wrap(func):
         sig = signature(func)
         nArgs = normaliseArgs(func, args, kwargs)
@@ -165,7 +244,14 @@ def ArgMap(*args, **kwargs):
         return func
     return wrap
 
-def mapArgs(optList, positionals, functions) -> (dict, dict):
+def mapArgs(optList: list, positionals: list, functions: list) -> dict:
+    """
+    Maps the values in optList and positionals to the parameters of the passed functions
+    :param optList: A list of arguments produced by :func:`getopt.gnu_getopt`()
+    :param positionals: A list of positional arguments produced by :func:`getopt.gnu_getopt`()
+    :param functions: A list of functions to map the command line argument values to.
+    :return: A dict keyed on the functions parameter names with the values found in optList and positionals.
+    """
     args = {}
     pos = [] # Accumulate all positionals from all functions for later processing
     for f in functions:
@@ -202,12 +288,23 @@ def mapArgs(optList, positionals, functions) -> (dict, dict):
     return args
 
 def resolvePositional(func, name) -> PositionalArg or None:
+    """
+    Determine if a function parameter has a specified positional mapping.
+    :param func: The function to check.
+    :param name: The parameter name to check.
+    :return: The PositionalArg instance or None
+    """
     if hasattr(func, '__argMap__') and name in func.__argMap__ and isinstance(func.__argMap__[name], PositionalArg):
         return func.__argMap__[name]
     else:
         return None
 
 def resolveArgPrefix(function) -> str:
+    """
+    Resolve the command line prefix for a function.
+    :param function: The function to resolve.
+    :return: The value of the '_func' property set by @ArgMap or the function name if not set.
+    """
     # Handle _func in argMap
     prefix = function.__name__ + ':'
     if hasattr(function, '__argMap__') and '_func' in function.__argMap__ and function.__argMap__['_func'] is not None:
@@ -217,6 +314,12 @@ def resolveArgPrefix(function) -> str:
     return prefix
 
 def resolveArgName(func, name) -> str:
+    """
+    Resolve the command line argument name for the specified function parameter.
+    :param func: The function to resolve.
+    :param name: The parameter name to resolve.
+    :return: A string containing the fully resolved command line argument name.
+    """
     # Prefix parameter with name if argMap unspecified
     if hasattr(func, '__argMap__'):
         if name in func.__argMap__:
@@ -236,7 +339,13 @@ def resolveArgName(func, name) -> str:
     else:
         return func.__name__ + ':' + name
 
-def argUnmapped(func, param: str):
+def argUnmapped(func, param: str) -> bool:
+    """
+    Helper to determine if a parameter mapping was set to None.
+    :param func: The function to check.
+    :param param: The parameter name to check.
+    :return: True if the parameter mapping was set to none.
+    """
     return hasattr(func, '__argMap__') and param in func.__argMap__ and func.__argMap__[param] is None
 
 # -- TUI Builder --
@@ -261,7 +370,7 @@ widgetMap = {
     'bool': boolParam
 }
 
-def configUI(screen, functions: list, yaml_node, call_name, title=''):
+def _configUI(screen, functions: list, yaml_node, call_name, title=''):
     Widgets.Frame.palette['edit_text'] = (Screen.COLOUR_BLACK, Screen.A_NORMAL, Screen.COLOUR_CYAN)
     Widgets.Frame.palette['section_header'] = (Screen.COLOUR_GREEN, Screen.A_UNDERLINE, Screen.COLOUR_BLUE)
 
@@ -334,7 +443,7 @@ def configUI(screen, functions: list, yaml_node, call_name, title=''):
 
 # -- Loader --
 
-def loadConfig(argv: list, functions: tuple, title='', positionalDoc: list=[], configParam='config', defaultConfig=None, configExpression = None, batchExpression=None) -> (dict, list):
+def loadConfig(argv: list, functions: tuple, title='', positionalDoc: list=[], configParam='config', defaultConfig=None, configExpression = None, batchExpression=None) -> dict:
     if isinstance(configExpression, str):
         configExpression = jmespath.compile(configExpression)
     if isinstance(batchExpression, str):
@@ -464,4 +573,4 @@ def loadConfig(argv: list, functions: tuple, title='', positionalDoc: list=[], c
         cfg = None
         if defaultConfig is not None:
             cfg = ruamel.yaml.load(defaultConfig, YAMLLoader)
-        Screen.wrapper(configUI, arguments=(functions, cfg, call_name, title))
+        Screen.wrapper(_configUI, arguments=(functions, cfg, call_name, title))
