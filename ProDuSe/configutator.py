@@ -154,15 +154,23 @@ def mapArgs(optList, functions, requirements=False) -> (dict, dict):
                         val = strtobool(val or 'True')
                     elif sig.parameters[name].annotation is not Parameter.empty:
                         try:
-                            # Added by Chris: if the input is a file or stream, just pass the string itself. Leave file openning up to the script
+                            # Added by Chris: if the input is a file or stream, just pass the string itself. Leave file handling up to the script
                             annotType = getTrueAnnotationType(sig.parameters[name].annotation)
-                            if annotType != io.IOBase:
+                            if annotType != io.IOBase and annotType != list:
                                 val = getTrueAnnotationType(sig.parameters[name].annotation)(val)
+                            # If the input parameter is a list of arguments, leave handling the arguments up to the script, and simply create a list of the args
+                            elif annotType == list:
+                                if type(args[f][name]) == list:
+                                    args[f][name].append(val)
+                                else:
+                                    args[f][name] = [val]
+                                continue
+                                    
                         except ValueError:
                             sys.stderr.write("ERROR: argument '%s' requires a(n) '%s', not '%s'\n" % (opt, getTrueAnnotationType(sig.parameters[name].annotation).__name__, type(val).__name__))
                             exit(1)
                     args[f][name] = val
-                    break  # No point continuing the search after a valid value is provided
+                    break  # No point continuing the search after a valid value is found for this option
             # Added by Chris: Was no value specified for this parameter, and was no default provided?
             # If so, throw an error
             if requirements and args[f][name] == "NULL":

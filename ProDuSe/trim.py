@@ -37,11 +37,10 @@ def IUPACMatch(code1: str, code2: str) -> bool:
 
 @ConfigMap()
 @ArgMap()
-def trim(input: io.IOBase, output: io.IOBase, barcode_distance: int, barcode_sequence: str, reverse: bool = False, mateStream: io.IOBase=None, verbose: bool = False, logStream: io.IOBase=stderr) -> (int, int):
+def trim(input: list, output: io.IOBase, barcode_distance: int, barcode_sequence: str, reverse: bool = False, verbose: bool = False, logStream: io.IOBase=stderr) -> (int, int):
     """
     Trims barcodes from reads in a fastq file
     :param input: A file or stream handle to read input data
-    :param mateStream: A file or stream handle to read mate input data
     :param output: A file or stream handle to output data
     :param barcode_distance: The maximum number of differences from the barcode sequence before the read is rejected. Set to negative to output rejected reads only.
     :param barcode_sequence: The IUPAC barcode sequence to match against.
@@ -54,10 +53,17 @@ def trim(input: io.IOBase, output: io.IOBase, barcode_distance: int, barcode_seq
     printPrefix = "PRODUSE-TRIM"
     stdout.write("\t".join([printPrefix, time.strftime('%X'), "Starting...\n"]))
 
+    # Prepare the input files
+    mainInput = input[0]
+    if len(input) == 1:  # Single-end sequencing or read
+        mated = False
+    else:  # Paired-end sequencing
+        mated = True
+        mateInput = input[1]
     if verbose:
         logStream.write("\n") # This will be deleted by the next write
+
     record1 = FastqRecord.FastqRecord()
-    mated = mateStream is not None
     if mated:
         record2 = FastqRecord.FastqRecord()
     invert = False
@@ -67,7 +73,7 @@ def trim(input: io.IOBase, output: io.IOBase, barcode_distance: int, barcode_seq
     if barcode_distance < 0:
         invert = True
         barcode_distance *= -1
-    while record1.read(input) and (not mated or record2.read(mateStream)):
+    while record1.read(mainInput) and (not mated or record2.read(mateInput)):
         if verbose:
             logStream.write("\x1b[F\x1b[2K\r{file}\tWorking on record: {record}\tRecords processed: {total}\n".format(file=outStream.name if hasattr(outStream, 'name') else 'Streaming', record=record1.name, total=count))
         count += 1
@@ -104,14 +110,14 @@ def trim(input: io.IOBase, output: io.IOBase, barcode_distance: int, barcode_seq
             if not mated:
                 stdout.write("\t".join([printPrefix, time.strftime('%X'), "Reads Processed: " + str(count), "Discard Rate: " + str(discardRate) + "%\n"]))
             else:
-                stdout.write("\t".join([printPrefix, time.strftime('%X'), "Read Pairs Processed: " + str(count), "Discard Rate: " + str(discardRate) + "%\n"]))
+                stdout.write("\t".join([printPrefix, time.strftime('%X'), "Pairs Processed: " + str(count), "Discard Rate: " + str(discardRate) + "%\n"]))
     # Now that all the reads have been processed, generate some final stats
     if verbose:
         logStream.write("\x1b[F\x1b[2K\r{file}\tTotal records: {total}\tRecords discarded: {discard}\n".format(file=output.name if hasattr(output, 'name') else 'Streaming', total=count, discard=discard))
     if not mated:
         stdout.write("\t".join([printPrefix, time.strftime('%X'), "Total Reads Processed: " + str(count), "Discard Rate: " + str(float(discard)/float(count)*100) + "%\n"]))
     else:
-        stdout.write("\t".join([printPrefix, time.strftime('%X'), "Total Read Pairs Processed: " + str(count), "Discard Rate: " + str(float(discard)/float(count)*100) + "%\n"]))
+        stdout.write("\t".join([printPrefix, time.strftime('%X'), "Total Pairs Processed: " + str(count), "Discard Rate: " + str(float(discard)/float(count)*100) + "%\n"]))
     stdout.write("\t".join([printPrefix, time.strftime('%X'), "Trim Complete\n"]))
     output.close()
     return discard, count
@@ -132,14 +138,28 @@ def main(args=None):
     for argmap, paths in loadConfig(args, (trim,), title='Trim V1.0'):
 
         # Open the input and output files/streams
-        inStream = argmap[trim]["input"]
-        if inStream == "-":
-            argmap[trim]["input"] = stdin
-        else:
-            argmap[trim]["input"] = open(inStream, 'rb')
-            if argmap[trim]["input"].peek(2)[:2] == b'\037\213':
-                argmap[trim]["input"] = gzip.open(inStream)
+        inFiles = argmap[trim]["input"]
+        # Handle input files
+        # Only a maximum of two paired end fastq files can be specified
+        if len(inFiles) > 2:
+            stderr.write("ERROR: A maximum of two input FASTQ files can be specified\n")
+            exit(1)
+        argmap[trim]["input"] = []
+        for file in inFiles:
+            if file == "-":
+                # Since a pipe can only be used to provide a single input, error out if both arguments specified pipes
+                if stdin in argmap[trim]["input"]:
+                    stderr.write("ERROR: A pipe can only specify a single input, not both\n")
+                    exit(1)
+                argmap[trim]["input"].append(stdin)
+            else:
+                x = open(file, 'rb')
+                if x.peek(2)[:2] == b'\037\213':
+                    argmap[trim]["input"].append(gzip.open(file))
+                else:
+                    argmap[trim]["input"].append(x)
 
+        # Open output file
         outStream = argmap[trim]["output"]
         if outStream == "-":
             argmap[trim]["output"] = stdout
