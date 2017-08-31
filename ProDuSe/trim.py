@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-import io
-from sys import stderr
+import io, time
+from sys import stderr, stdout
 
 # If running directly, this works fine
 try:
     import FastqRecord
-    from configutator import ConfigMap, ArgMap, loadConfig
+    from configutator import ConfigMap, ArgMap, loadConfig, InvalidParamter
 # If installed
 except ImportError:
     from ProDuSe import FastqRecord
@@ -35,20 +35,25 @@ IUPACCodeDict = {
 def IUPACMatch(code1: str, code2: str) -> bool:
     return code2 in IUPACCodeDict[code1]
 
-@ConfigMap(inStream=None, mateStream=None, outStream=None, logStream=None)
-@ArgMap(inStream=None, mateStream=None, outStream=None, logStream=None)
-def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barcode_sequence: str, reverse: bool = False, mateStream: io.IOBase = None, verbose: bool = False, logStream: io.IOBase=stderr) -> (int, int):
+@ConfigMap()
+@ArgMap()
+def trim(input: io.IOBase, output: io.IOBase, barcode_distance: int, barcode_sequence: str, reverse: bool = False, mateStream: io.IOBase=None, verbose: bool = False, logStream: io.IOBase=stderr) -> (int, int):
     """
     Trims barcodes from reads in a fastq file
-    :param inStream: A file or stream handle to read input data
+    :param input: A file or stream handle to read input data
     :param mateStream: A file or stream handle to read mate input data
-    :param outStream: A file or stream handle to output data
+    :param output: A file or stream handle to output data
     :param barcode_distance: The maximum number of differences from the barcode sequence before the read is rejected. Set to negative to output rejected reads only.
     :param barcode_sequence: The IUPAC barcode sequence to match against.
     :param reverse: Set to true to read sequences in reverse, looking for the barcode at the other end.
     :param verbose: Provide verbose output while processing
     :return:
     """
+
+    # Used to print out update messages:
+    printPrefix = "PRODUSE-TRIM"
+    stdout.write("\t".join([printPrefix, time.strftime('%X'), "Starting...\n"]))
+
     if verbose:
         logStream.write("\n") # This will be deleted by the next write
     record1 = FastqRecord.FastqRecord()
@@ -58,10 +63,11 @@ def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barco
     invert = False
     count = 0
     discard = 0
+    warned = False
     if barcode_distance < 0:
         invert = True
         barcode_distance *= -1
-    while record1.read(inStream) and (not mated or record2.read(mateStream)):
+    while record1.read(input) and (not mated or record2.read(mateStream)):
         if verbose:
             logStream.write("\x1b[F\x1b[2K\r{file}\tWorking on record: {record}\tRecords processed: {total}\n".format(file=outStream.name if hasattr(outStream, 'name') else 'Streaming', record=record1.name, total=count))
         count += 1
@@ -74,7 +80,7 @@ def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barco
         record1.desc1 += '\tBC:Z:' + barcode1 + barcode2
         if mated:
             record2.desc1 += '\tBC:Z:' + barcode2 + barcode1
-        for record, barcode in ((record1, barcode1), (record2, barcode2)) if mated else ((record1, barcode1)):
+        for record, barcode in ((record1, barcode1), (record2, barcode2)) if mated else ((record1, barcode1),):
             mismatch = 0
             mismatch += sum(not IUPACMatch(bc, sq) for bc, sq in zip(barcode_sequence, reversed(barcode) if reverse else barcode))
             if len(barcode) < len(barcode_sequence):
@@ -86,66 +92,70 @@ def trim(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barco
                 record.qual = ''
             else:
                 record.trim(0 if reverse else len(barcode_sequence), len(barcode_sequence) if reverse else 0)
-            record.write(outStream)
+            record.write(output)
+        if count % 100000 == 0:
+            # Do a quick sanity check: If a significant fraction of reads have been discarded, it is likely that the barcodes is incorrect
+            # In this case, inform the user, but continue anyways
+            discardRate = float(discard)/float(count)*100
+            if not warned and discardRate > 60:
+                stdout.write("WARNING: A significant fraction of reads are being discarded. Are you sure the barcode sequence is correct?\n")
+                stdout.write("If you are unsure, try running \"produse adapter_predict\" or \"adapter_predict.py\" to double-check the barcode sequence\n")
+                warned = True
+            if not mated:
+                stdout.write("\t".join([printPrefix, time.strftime('%X'), "Reads Processed: " + str(count), "Discard Rate: " + str(discardRate) + "%\n"]))
+            else:
+                stdout.write("\t".join([printPrefix, time.strftime('%X'), "Read Pairs Processed: " + str(count), "Discard Rate: " + str(discardRate) + "%\n"]))
+    # Now that all the reads have been processed, generate some final stats
     if verbose:
-        logStream.write("\x1b[F\x1b[2K\r{file}\tTotal records: {total}\tRecords discarded: {discard}\n".format(file=outStream.name if hasattr(outStream, 'name') else 'Streaming', total=count, discard=discard))
-    outStream.close()
+        logStream.write("\x1b[F\x1b[2K\r{file}\tTotal records: {total}\tRecords discarded: {discard}\n".format(file=output.name if hasattr(output, 'name') else 'Streaming', total=count, discard=discard))
+    if not mated:
+        stdout.write("\t".join([printPrefix, time.strftime('%X'), "Total Reads Processed: " + str(count), "Discard Rate: " + str(float(discard)/float(count)*100) + "%\n"]))
+    else:
+        stdout.write("\t".join([printPrefix, time.strftime('%X'), "Total Read Pairs Processed: " + str(count), "Discard Rate: " + str(float(discard)/float(count)*100) + "%\n"]))
+    stdout.write("\t".join([printPrefix, time.strftime('%X'), "Trim Complete\n"]))
+    output.close()
     return discard, count
 
 
 def main(args=None):
-    from sys import stdout, stdin, argv
+    from sys import stdin, argv
     import gzip, os, errno
-<<<<<<< HEAD:ProDuSe/trim.py
     if args is None:
         args = argv
+    """
     pathsDoc = [
         ('reads.fastq[.gz]', 'Fastq with reads to trim'),
         ('[mates.fastq[.gz]]', 'Mates fastq that will also be trimmed and interlaced in the output'),
         ('output.fastq[.gz]', 'Path to output trimmed fastq to')
     ]
-    for argmap, paths in loadConfig(argv, (trim,), title='Trim V1.0', positionalDoc=pathsDoc):
-=======
+    """
+    for argmap, paths in loadConfig(args, (trim,), title='Trim V1.0'):
 
-    if args is None:
-        args = argv
-    for argmap, paths in loadConfig(args, (trim,), title="Trim V1.0"):
->>>>>>> ba875d83d42f7057b99a67e70aec1c364675065e:ProDuSe/trim.py
-        if len(paths):
-            inFile = open(paths[0], 'rb')
-            if inFile.peek(2)[:2] == b'\037\213':
-                inFile = gzip.open(inFile)
+        # Open the input and output files/streams
+        inStream = argmap[trim]["input"]
+        if inStream == "-":
+            argmap[trim]["input"] = stdin
         else:
-            inFile = stdin
-        if len(paths) > 2:
-            mateFile = open(paths[1], 'rb')
-            if mateFile.peek(2)[:2] == b'\037\213':
-                mateFile = gzip.open(mateFile)
+            argmap[trim]["input"] = open(inStream, 'rb')
+            if argmap[trim]["input"].peek(2)[:2] == b'\037\213':
+                argmap[trim]["input"] = gzip.open(inStream)
+
+        outStream = argmap[trim]["output"]
+        if outStream == "-":
+            argmap[trim]["output"] = stdout
         else:
-            mateFile = None
-        if len(paths) > 1:
-            i = 2 if len(paths) > 2 else 1
-            if not os.path.exists(os.path.dirname(paths[i])):
+            if os.path.dirname(outStream) and not os.path.exists(os.path.dirname(outStream)):
                 try:
-                    os.makedirs(os.path.dirname(paths[i]))
+                    os.makedirs(os.path.dirname(outStream))
                 except OSError as e:
                     if e.errno != errno.EEXIST:
                         raise
-            if paths[i].endswith('.gz'):
-                outFile = gzip.open(paths[i], 'wb+')
+            if outStream.endswith('.gz'):
+                argmap[trim]["output"] = gzip.open(outStream, 'wb+')
             else:
-                outFile = open(paths[i], 'wb+')
-        else:
-            outFile = stdout
-<<<<<<< HEAD:ProDuSe/trim.py
-        trim(inFile, outFile, mateStream=mateFile, **argmap[trim])
+                argmap[trim]["output"] = open(outStream, 'wb+')
+        trim(**argmap[trim])
+
 
 if __name__ == "__main__":
     main()
-
-=======
-        trim(inFile, outFile, **argmap[trim])
-
-if __name__ == "__main__":
-    main()
->>>>>>> ba875d83d42f7057b99a67e70aec1c364675065e:ProDuSe/trim.py

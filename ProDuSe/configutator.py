@@ -1,6 +1,7 @@
 import re, os, pickle, sys
 from getopt import gnu_getopt
 from inspect import signature, getdoc, getfile, Parameter
+import io
 
 # If calling directly, this works fine
 try:
@@ -19,6 +20,11 @@ from asciimatics.screen import Screen, StopApplication, NextScene
 from asciimatics.scene import Scene
 import asciimatics.widgets as Widgets
 from asciimatics.event import KeyboardEvent
+
+
+class InvalidParamter(Exception):
+    # A base exception message that is thrown if a paramter is invalid
+    pass
 
 YAMLLoader = ruamel.yaml.SafeLoader
 
@@ -122,7 +128,7 @@ def ArgMap(*args, **kwargs):
         return func
     return wrap
 
-def mapArgs(optList, functions) -> (dict, dict):
+def mapArgs(optList, functions, requirements=False) -> (dict, dict):
     args = {}
     for f in functions:
         sig = signature(f)
@@ -137,14 +143,31 @@ def mapArgs(optList, functions) -> (dict, dict):
         for name, param in sig.parameters.items():
             argName = resolveArgName(f, name)
             if not argName: continue
+            # Set a default, or "Null", if one does not exist
+            if param.default == Parameter.empty:
+                args[f][name] = "NULL"
+            else:
+                args[f][name] = param.default
             for opt, val in optList:
                 if opt == '--' + argName:
                     if issubclass(getTrueAnnotationType(sig.parameters[name].annotation), bool):
                         val = strtobool(val or 'True')
                     elif sig.parameters[name].annotation is not Parameter.empty:
-                        val = getTrueAnnotationType(sig.parameters[name].annotation)(val)
+                        try:
+                            # Added by Chris: if the input is a file or stream, just pass the string itself. Leave file openning up to the script
+                            annotType = getTrueAnnotationType(sig.parameters[name].annotation)
+                            if annotType != io.IOBase:
+                                val = getTrueAnnotationType(sig.parameters[name].annotation)(val)
+                        except ValueError:
+                            sys.stderr.write("ERROR: argument '%s' requires a(n) '%s', not '%s'\n" % (opt, getTrueAnnotationType(sig.parameters[name].annotation).__name__, type(val).__name__))
+                            exit(1)
                     args[f][name] = val
-
+                    break  # No point continuing the search after a valid value is provided
+            # Added by Chris: Was no value specified for this parameter, and was no default provided?
+            # If so, throw an error
+            if requirements and args[f][name] == "NULL":
+                sys.stderr.write("ERROR: argument '--%s' is required\n" % name)
+                exit(1)
         # Handle config path overrides TODO: This should be moved out of this function
         for opt, val in optList:
             if opt == prefix:
@@ -367,13 +390,20 @@ def loadConfig(args: list, functions: tuple, title='', positionalDoc: list=[], c
                         if f not in argMap:
                             argMap[f] = {}
                         argMap[f].update(m)
+
+                    # Check that each function paramter has a value, if one does not exist by default
+                    for arg, value in argMap[f].items():
+                        # No value was provided for this paramter, and a default is not avalible
+                        if value == "NULL":
+                            sys.stderr.write("ERROR: Argument '--%s' is required\n" % (arg))
+                            exit(1)
                     #TODO os.fork() to parallelize jobs
                     yield argMap, params
             return
 
     if len(args):
         # If parameters were passed, skip TUI
-        yield mapArgs(optList, functions), params
+        yield mapArgs(optList, functions, requirements=True), params
         return
     else:
         # No parameters were passed, load TUI
