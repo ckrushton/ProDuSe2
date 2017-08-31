@@ -232,6 +232,7 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, output: str, bwa: Execu
     sort.wait()
     shutil.rmtree(temp_dir)
 
+<<<<<<< HEAD:ProDuSe/produse.py
 def main(args=None):
     ConfigMap(_func='trim', verbose=None, logStream=None)(trim)
     ConfigMap(_func='collapse', verbose=None, logStream=None)(collapse)
@@ -254,3 +255,21 @@ def main(args=None):
 if __name__ == "__main__":
     main()
 
+=======
+
+def main(args=None):
+
+    if args is None:
+        args = sys.argv
+    ConfigMap(_func='trim', verbose=None)(trim)
+    ConfigMap(_func='collapse', verbose=None)(collapse)
+    ArgMap(_func=trim.__name__, verbose='verbose')(trim)
+    ArgMap(_func=collapse.__name__, verbose='verbose')(collapse)
+    for argmap, params in loadConfig(args, (ProDuSe, trim, collapse), batchExpression='samples'):
+        global config
+        config = argmap
+        ProDuSe(**argmap[ProDuSe])
+
+if __name__ == "__main__":
+    main()
+>>>>>>> c1e0b8f7405451bb9e981e9490742ed78e82c2b3:ProDuSe/produse.py

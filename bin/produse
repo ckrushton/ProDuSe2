@@ -2,7 +2,6 @@
 
 import sys
 from ProDuSe.__version import __version__
-
 from ProDuSe import trim, clip, collapse, adapter_predict, produse
 
 
