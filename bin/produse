@@ -1,0 +1,56 @@
+#! /usr/bin/env python
+
+import sys
+from ProDuSe.__version import __version__
+from ProDuSe import trim, clip, collapse, adapter_predict, produse
+
+
+def usage():
+	"""
+	Prints ProDuSe's usage information to stdout
+	"""
+
+	sys.stdout.write("\nProDuSe: Variant Caller for semi-degenerate barcoded adapter libraries\n")
+	sys.stdout.write("Version: " + __version__ + "\n")
+	sys.stdout.write("\n")
+	sys.stdout.write("Usage:\tproduse <command> [options]\n")
+	sys.stdout.write("\n")
+	sys.stdout.write("Commands:\n")
+	sys.stdout.write("adapter_predict\tIdentifies the degerate barcode used in a set of FASTQ files\n")
+	sys.stdout.write("run_produse\tRuns all steps of the ProDuSe pipeline listed below\n")
+	sys.stdout.write("trim\t\tRemoves barcodes from FASTQ files\n")
+	sys.stdout.write("clip\t\tClips bases which overlap in both the forward and reverse reads in paired-end sequencing\n")
+	sys.stdout.write("collapse\tIdentifies duplicates,and merges duplicates into a consensus\n")
+	sys.stdout.write("call\t\tIdentifies variants\n")
+	sys.stdout.write("\n")
+	exit(1)
+
+
+def main(args):
+
+	# Print out a usage message
+	if len(args) == 1:
+		usage()
+
+	command = args[1]
+
+	if command == "adapter_predict":
+		adapter_predict.main(argv=args[2:])
+	elif command == "run_produse":
+		produse.main(args[1:])
+	elif command == "trim":
+		trim.main(args[1:])
+	elif command == "collapse":
+		collapse.main(args[1:])
+	elif command == "clip":
+		clip.main(args[2:])
+	elif command == "call":
+		sys.stdout.write("Not yet finished")
+	else:
+		sys.stdout.write("\nUnknown command: %s\n" % (command))
+		usage()
+
+
+if __name__ == "__main__":
+	args = sys.argv
+	main(args)
