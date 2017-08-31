@@ -146,7 +146,7 @@ class FamilyRecord:
 
         # Copy into pysam record
         record = pysam.AlignedSegment()
-        record.query_name = self.pos + self.name
+        record.query_name = str(self.pos) + self.name
         record.reference_start = self.pos
         record.mapping_quality = self.maxMapQ
         record.flag = 17

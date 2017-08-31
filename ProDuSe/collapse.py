@@ -157,7 +157,10 @@ class Families:
             graph = nx.empty_graph(len(pos)) #type: nx.Graph
             for node, data in graph.nodes_iter(True):
                 data['weight'] = len(pos[keys[node]])
+<<<<<<< 49e268780421c52ea4c74743c5dd6c82f21dcf61
 
+=======
+>>>>>>> Changed file handling in trim, minor bug fixes
             for u, v in itertools.combinations(range(len(pos)), 2):
                 # Keep families with F/R separate
                 if keys[u][0] != keys[v][0]: continue
@@ -298,6 +301,7 @@ def CoordinateSortedInputFamilyIterator(inFile, families):
             lastStartPos = startPos
         families.addRecord(record)
 
+<<<<<<< 49e268780421c52ea4c74743c5dd6c82f21dcf61
 def createAndOpen(path, mode):
     if not os.path.exists(os.path.dirname(path)):
         try:
@@ -310,10 +314,15 @@ def createAndOpen(path, mode):
 @ConfigMap(inStream=TransformCfg('input', (open, None, ('rb',))), outStream=TransformCfg('output', (createAndOpen, None, ('wb+',))), logStream=TransformCfg('log', (createAndOpen, None, ('w+',))))
 @ArgMap(inStream=PositionalArg(0, 'input', 'Path to input bam file with barcoded reads.', (createAndOpen, None, ('wb+',))), outStream=PositionalArg(1, 'output', 'Path to input bam file with barcoded reads.'), logStream=PositionalArg(2, 'log', 'Path to output verbose log.'))
 def collapse(barcode_distance: int, barcode_mask: str, verbose: bool=False, inStream: io.IOBase=stdin, outStream: io.IOBase=stdout,  logStream: io.IOBase=stderr):
+=======
+@ConfigMap()
+@ArgMap()
+def collapse(input: io.IOBase, output: io.IOBase, barcode_distance: int, barcode_mask: str, verbose: bool=False, logStream: io.IOBase=stderr):
+>>>>>>> Changed file handling in trim, minor bug fixes
     """
     Collapse reads sharing the same start position, forward/reverse, and barcode into a single family record.
-    :param inStream: A file or stream handle to read input data
-    :param outStream: A file or stream handle to output data
+    :param input: A file or stream handle to read input data
+    :param output: A file or stream handle to output data
     :param barcode_distance: The maximum number of differences allowed to be considered the same family
     :param barcode_mask: String mask to denote the positions within a barcode to include in the family name
     :param verbose: Provide verbose output while processing
@@ -322,9 +331,15 @@ def collapse(barcode_distance: int, barcode_mask: str, verbose: bool=False, inSt
     """
     if verbose:
         logStream.write("\n") # This will be deleted by the next write
+<<<<<<< 49e268780421c52ea4c74743c5dd6c82f21dcf61
     inFile = pysam.AlignmentFile(inStream)
     outFile = pysam.AlignmentFile(outStream, "wbu" if hasattr(outStream, 'name') else "wb", template=inFile) # compress the data if it is a file
     families = Families(barcode_mask*2, barcode_distance) # reads have mate barcode concatenated so double up mask # TODO multiply distance by 2?
+=======
+    inFile = pysam.AlignmentFile(input)
+    outFile = pysam.AlignmentFile(output, "wbu" if hasattr(output, 'name') else "wb", template=inFile) # compress the data if it is a file
+    families = Families(barcode_mask*2, barcode_distance) # reads have mate barcode concatenated so double up mask
+>>>>>>> Changed file handling in trim, minor bug fixes
     count = 0
     fcount = 0
     lastFCount = 0
@@ -356,6 +371,7 @@ def main(args=None):
     from configutator import loadConfig
     if args is None:
         args = argv
+
     cfgs = loadConfig(args, (collapse,), title="Collapse V1.0")
     while True: # Skip missing inputs
         try:
