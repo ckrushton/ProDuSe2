@@ -16,6 +16,6 @@ if [ "$#" == "0" ]; then
 	exit 1
 fi
 
-CMD = $1
+CMD=$1
 shift
-python3 $SCRIPTPATH/../ProDuSe/$CMD.py "$@"
+python3 "$SCRIPTPATH/../ProDuSe/$CMD.py" "$@"
