@@ -8,7 +8,8 @@ else:
 import sortedcontainers
 import networkx as nx
 import io, itertools, collections
-from sys import maxsize, stderr
+from sys import maxsize, stderr, stdout
+import time
 
 # If running directly, this works fine
 try:
@@ -145,7 +146,7 @@ class Families:
             keys = list(pos.keys())
             graph = nx.empty_graph(len(pos)) #type: nx.Graph
             for node, data in graph.nodes_iter(True):
-                data['weight'] = pos[keys[node]].size
+                data['weight'] = len(pos[keys[node]])
             for u, v in itertools.combinations(range(len(pos)), 2):
                 dist = hamming(strandCode(keys[u], self._barcode_mask, True), strandCode(keys[v], self._barcode_mask, True), self._barcode_distance)
                 if dist < self._barcode_distance: graph.add_edge(u, v, weight=dist)
@@ -204,28 +205,34 @@ def CoordinateSortedInputFamilyIterator(inFile, families):
                 startPos = record.reference_start
         families.addRecord(record)
 
-@ConfigMap(inStream=None, outStream=None, logStream=None)
-@ArgMap(inStream=None, outStream=None, logStream=None)
-def collapse(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, barcode_mask: str, verbose: bool=False, logStream: io.IOBase=stderr):
+@ConfigMap()
+@ArgMap()
+def collapse(input: io.IOBase, output: io.IOBase, barcode_distance: int, barcode_mask: str, verbose: bool=False, logStream: io.IOBase=stderr):
     """
     Collapse reads sharing the same start position, forward/reverse, and barcode into a single family record.
-    :param inStream: A file or stream handle to read input data
-    :param outStream: A file or stream handle to output data
+    :param input: A file or stream handle to read input data
+    :param output: A file or stream handle to output data
     :param barcode_distance: The maximum number of differences allowed to be considered the same family
     :param barcode_mask: String mask to denote the positions within a barcode to include in the family name
     :param verbose: Provide verbose output while processing
     :param logStream: The stream to write log output to, defaults to stderr
     :return: None
     """
+
+    printPrefix = "PRODUSE-COLLAPSE"
     if verbose:
         logStream.write("\n") # This will be deleted by the next write
-    inFile = pysam.AlignmentFile(inStream)
-    outFile = pysam.AlignmentFile(outStream, "wbu" if hasattr(outStream, 'name') else "wb", template=inFile) # compress the data if it is a file
+    inFile = pysam.AlignmentFile(input)
+    outFile = pysam.AlignmentFile(output, "wbu" if hasattr(output, 'name') else "wb", template=inFile) # compress the data if it is a file
     families = Families(barcode_mask*2, barcode_distance) # reads have mate barcode concatenated so double up mask
     count = 0
     fcount = 0
     lastFCount = 0
     lastFamilyPos = 0
+    i = 0
+
+    stdout.write("\t".join([printPrefix, time.strftime('%X'), "Starting...\n"]))
+
     for family in CoordinateSortedInputFamilyIterator(inFile, families): #type: FamilyRecord
         outFile.write(family.toPysam())
         count += len(family)
@@ -241,12 +248,15 @@ def collapse(inStream: io.IOBase, outStream: io.IOBase, barcode_distance: int, b
                             )
             lastFamilyPos = family.pos
             lastFCount = fcount
+        if int(count / 100000) > i:
+            stdout.write("\t".join([printPrefix, time.strftime('%X'), "Collapsed %s reads into %s families\n" % (count, fcount)]))
+            i += 1
 
+    stdout.write("\t".join([printPrefix, time.strftime('%X'), "Collapsed %s reads into %s families\n" % (count, fcount)]))
     if verbose:
         logStream.write("Completed.\n")
     inFile.close()
     outFile.close()
-    outStream.close()
 
 
 def main(args=None):
@@ -256,17 +266,12 @@ def main(args=None):
     if args is None:
         args = argv
     for argmap, paths in loadConfig(args, (collapse,), title="Collapse V1.0"):
-        if len(paths) and not os.path.exists(paths[0]):
-            if 'verbose' in argmap[collapse] and argmap[collapse]['verbose']:
-                stderr.write("{} not found, skipping.\n".format(paths[0]))
-            continue
-        if len(paths) > 1 and not os.path.exists(os.path.dirname(paths[1])):
-            try:
-                os.makedirs(os.path.dirname(paths[1]))
-            except OSError as e:
-                if e.errno != errno.EEXIST:
-                    raise
-        collapse(open(paths[0], 'rb') if len(paths) else stdin, open(paths[1], 'wb+') if len(paths) > 1 else stdout, **argmap[collapse])
+
+        if argmap[collapse]["input"] == "-":
+            argmap[collapse]["input"] = stdin
+        if argmap[collapse]["output"] == "-":
+            argmap[collapse]["output"] = stdout
+        collapse(**argmap[collapse])
 
 if __name__ == "__main__":
     main()
