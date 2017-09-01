@@ -217,7 +217,12 @@ class Families:
             family.mate.mate = family
 
     def __iter__(self):
-        return self._familyRecords.__iter__()
+        def itr():
+            for pos in self._familyRecords.values():
+                self._collapsePosition(pos)
+                for family in pos.values():
+                    yield family
+        return itr
 
     def __len__(self):
         return len(self._familyRecords)
@@ -295,6 +300,12 @@ def CoordinateSortedInputFamilyIterator(inFile, families):
                 pass
             lastStartPos = startPos
         families.addRecord(record)
+
+def UnsortedInputFamilyIterator(inFile, families):
+    for record in inFile.fetch(until_eof=True):
+        families.addRecord(record)
+    for family in families:
+        yield family
 
 def createAndOpen(path, mode):
     if not os.path.exists(os.path.dirname(path)):
