@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+SCRIPTPATH=`dirname $0`
+if [ "$#" == "0" ]; then
+	printf "ProDuSe: Variant Caller for semi-degenerate barcoded adapter libraries\n"
+	printf "Version: $(python3 $SCRIPTPATH/../ProDuSe/__version.py)\n"
+	printf "\n"
+	printf "Usage:\tproduse <command> [options]\n"
+	printf "\n"
+	printf "Commands:\n"
+	printf "adapter_predict\tIdentifies the degerate barcode used in a set of FASTQ files\n"
+	printf "run_produse\tRuns all steps of the ProDuSe pipeline listed below\n"
+	printf "trim\t\tRemoves barcodes from FASTQ files\n"
+	printf "clip\t\tClips bases which overlap in both the forward and reverse reads in paired-end sequencing\n"
+	printf "collapse\tIdentifies duplicates,and merges duplicates into a consensus\n"
+	printf "call\t\tIdentifies variants\n"
+	exit 1
+fi
+
+CMD = $1
+shift
+python3 $SCRIPTPATH/../ProDuSe/$CMD.py "$@"

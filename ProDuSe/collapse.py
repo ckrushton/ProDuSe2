@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 import platform
 if platform.python_implementation() == 'PyPy':
-    import pypysam
+    from pypysam import AlignedSegment, AlignmentFile
 else:
-    import pysam
+    from pysam import AlignedSegment, AlignmentFile
 
 import sortedcontainers
 import networkx as nx
@@ -22,7 +22,7 @@ strandThreshold = 0.4 # 40% percent tolerance of deviation for the strand identi
 strandMaskId = 'S'
 OSTagName = 'OS' # Id for original start position tag
 
-def getBarcode(record: pysam.AlignedSegment):
+def getBarcode(record: AlignedSegment):
     try:
         return record.get_tag('BC')
     except KeyError:
@@ -64,10 +64,10 @@ def maskString(string: str, mask: str, maskCode: str, exclude: bool=False) -> st
             result += element
     return result
 
-def familyName(record: pysam.AlignedSegment, barcodeMask: str) -> str:
+def familyName(record: AlignedSegment, barcodeMask: str) -> str:
     """
     Builds family name from forward/reverse and barcode
-    :param record: pysam.AlignedSegment with the BC tag set
+    :param record: AlignedSegment with the BC tag set
     :param barcodeMask: String mask containing '0' for any elements to exclude from the name
     :return: String containing family name
     """
@@ -92,7 +92,7 @@ class Families:
         self._barcode_distance = barcode_distance
         self._recordCounter = 1
 
-    def addRecord(self, record: pysam.AlignedSegment):
+    def addRecord(self, record: AlignedSegment):
         try:
             startPos = record.get_tag(OSTagName)  # type: int
         except KeyError:
@@ -230,7 +230,7 @@ class Families:
     def __delitem__(self, pos):
         del self._familyRecords[pos]
 
-    def toPysam(self, family: FamilyRecord) -> (pysam.AlignedSegment, pysam.AlignedSegment):
+    def toPysam(self, family: FamilyRecord) -> (AlignedSegment, AlignedSegment):
         self.setMate(family)
         if family.mate.name != family.name:
             family.name = self._recordCounter
@@ -260,7 +260,7 @@ class Families:
             tags.append(('fC', fC))
 
         # Copy into pysam record
-        record = pysam.AlignedSegment()
+        record = AlignedSegment()
         record.query_name = family.name
         record.reference_start = family.pos
         record.mapping_quality = family.maxMapQ
@@ -282,7 +282,7 @@ class Families:
             record.set_tags(tags)
         return record
 
-def CoordinateSortedInputFamilyIterator(inFile, families):
+def CoordinateSortedInputFamilyIterator(inFile, families: Families) -> FamilyRecord:
     lastStartPos = 0
     for record in inFile.fetch(until_eof=True):
         try:
@@ -301,7 +301,7 @@ def CoordinateSortedInputFamilyIterator(inFile, families):
             lastStartPos = startPos
         families.addRecord(record)
 
-def UnsortedInputFamilyIterator(inFile, families):
+def UnsortedInputFamilyIterator(inFile, families: Families) -> FamilyRecord:
     for record in inFile.fetch(until_eof=True):
         families.addRecord(record)
     for family in families:
@@ -332,8 +332,8 @@ def collapse(barcode_distance: int, barcode_mask: str, verbose: bool=False, inSt
     if verbose:
         logStream.write("\n") # This will be deleted by the next write
 
-    inFile = pysam.AlignmentFile(inStream)
-    outFile = pysam.AlignmentFile(outStream, "wbu" if hasattr(outStream, 'name') else "wb", template=inFile) # compress the data if it is a file
+    inFile = AlignmentFile(inStream)
+    outFile = AlignmentFile(outStream, "wbu" if hasattr(outStream, 'name') else "wb", template=inFile) # compress the data if it is a file
     families = Families(barcode_mask*2, barcode_distance) # reads have mate barcode concatenated so double up mask # TODO multiply distance by 2?
     count = 0
     fcount = 0
