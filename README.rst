@@ -96,3 +96,5 @@ Here is an example config.yaml with all parameters specified::
       trim:
         <<: *trim_default
         barcode_sequence: NNNWSMRWSYWKMWWT
+
+As you can see, multiple samples can be specified in the same config file and will all be processed with a single run of ProDuSe.
