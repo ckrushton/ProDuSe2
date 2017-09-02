@@ -31,9 +31,11 @@ The relevant publications can be found here:
 - 
 - 
 
-Note: 
-- ProDuSe makes use of `ClipOverlap <https://github.com/innovate-invent/clip>`_ in its pipeline with parameters -abt8
-- bwa mem is the aligner used
+Note:
+-----
+
+- ProDuSe makes use of `ClipOverlap <https://github.com/innovate-invent/clip>`_ in its pipeline with arguments -abt8.
+- bwa mem is the aligner used.
 
 Collapse
 --------
