@@ -18,7 +18,7 @@ To use:
   $ produse
   Usage:   produse <command> [options]
   Commands:
-  adapter_predict Identifies the degerate barcode used in a set of FASTQ files
+  adapter_predict Identifies the degenerate barcode used in a set of FASTQ files
   run             Runs all steps of the ProDuSe pipeline listed below
   trim            Removes barcodes from FASTQ files
   collapse        Identifies duplicates,and merges duplicates into a consensus
