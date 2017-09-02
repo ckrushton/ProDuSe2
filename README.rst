@@ -36,7 +36,7 @@ Note: ProDuSe makes use of `ClipOverlap <https://github.com/innovate-invent/clip
 Collapse
 --------
 
-Collapse reduces records with the same reference start position, forward/reverse flag and barcode within a specified Hamming distance to a single concensus family record. A consensus family record is essentiall a pileup of the family member records and the most common operation/base at each position is retained.
+Collapse reduces records with the same reference start position, forward/reverse flag and barcode within a specified Hamming distance to a single concensus family record. A consensus family record is essentially a pileup of the family member records and the most common operation/base at each position is retained.
 The families are first collapsed if the barcodes are identical into "proto-families". These proto-families barcodes are then compared to each other producing a graph with node weights of the proto-family size and edge weights of their Hamming distances. The graph is reduced to a minimum spanning forest where any edges above threshold are removed. Each tree in the forest is further reduced to a diameter twice the threshold while maximising each subtrees node weight. 
 A concensus of each tree is then finalised.
 
