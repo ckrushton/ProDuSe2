@@ -52,3 +52,47 @@ Each family record is output with two additional tags:
 Call
 ----
 
+Configuration
+-------------
+
+While all arguments can be passed via command line, the main pipeline requires so many that a config file is recommended. Config files are in YAML format. See `configutator <https://github.com/innovate-invent/configutator>`_ for more details.
+
+Here is an example config.yaml with all parameters specified::
+
+  default: &default
+    output: ./
+    reference: Ref.fa
+    bwa: bwa mem -t 10
+    samtools: samtools
+
+    trim: &trim_default
+      barcode_distance: 3
+
+    collapse: &collapse_default
+      barcode_mask: "SSS1111111111110"
+      barcode_distance: 3
+
+    filter: &filter_default
+      min_molecules: 2
+      mutant_molecules: 3
+      variant_allele_fraction_threshold: 0.01
+      min_reads_per_uid: 1
+
+  samples:
+    - name: test1
+      <<: *default     # Inherit default parameters
+      fastqs:
+        - test/test1/onm_R1.fastq
+        - test/test1/onm_R1.fastq
+      trim:
+        <<: *trim_default
+        barcode_sequence: NNNWSMRWSYWKMWWT
+
+    - name: test2
+      <<: *default     # Inherit default parameters
+      fastqs:
+        - test/test2/afnm_R1.fastq
+        - test/test2/afnm_R2.fastq
+      trim:
+        <<: *trim_default
+        barcode_sequence: NNNWSMRWSYWKMWWT
