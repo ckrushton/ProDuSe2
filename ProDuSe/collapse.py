@@ -9,14 +9,13 @@ import sortedcontainers
 import networkx as nx
 import io, itertools, collections
 from sys import stdout, stdin, stderr, argv, maxsize
+from configutator import ConfigMap, ArgMap, loadConfig, PositionalArg, TransformCfg
 
 # If running directly, this works fine
 try:
     from FamilyRecord import FamilyRecord
-    from configutator import ConfigMap, ArgMap, loadConfig, TransformCfg
 except ImportError:
     from ProDuSe.FamilyRecord import FamilyRecord
-    from ProDuSe.configutator import ConfigMap, ArgMap, PositionalArg, TransformCfg
 
 strandThreshold = 0.4 # 40% percent tolerance of deviation for the strand identifier sequence
 strandMaskId = 'S'
