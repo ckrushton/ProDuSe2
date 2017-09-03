@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-import sys, os, tempfile, shutil, gzip, selectors, re
+import sys, os, tempfile, shutil, selectors, re
 
-from .collapse import collapse
-from clipoverlap import clip
-from .trim import trim
-from configutator import ConfigMap, ArgMap, loadConfig
+from configutator import ConfigMap, ArgMap
 from configutator.valitator import Path, PathOrNone, Executable
 
 from multiprocessing import Process
@@ -130,6 +127,9 @@ def ProDuSe(fastq1: Path, fastq2: Path, reference: Path, output: str, bwa: Execu
     :param verbose: Provide verbose output while processing
     :return: None
     """
+    from .collapse import collapse
+    from clipoverlap import clip
+    from .trim import trim
     global config
     stderr = sys.stderr
     temp_dir = tempfile.mkdtemp()

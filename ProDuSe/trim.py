@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import io, gzip
 from sys import stdin, stdout, stderr
-import FastqRecord
+from .FastqRecord import FastqRecord
 from configutator import ConfigMap, ArgMap, PositionalArg, TransformCfg
 
 IUPACCodeDict = {
@@ -80,10 +80,10 @@ def trim(barcode_distance: int, barcode_sequence: str, reverse: bool = False, in
     """
     if verbose:
         logStream.write("\n") # This will be deleted by the next write
-    record1 = FastqRecord.FastqRecord()
+    record1 = FastqRecord()
     mated = mateStream is not None
     if mated:
-        record2 = FastqRecord.FastqRecord()
+        record2 = FastqRecord()
     invert = False
     count = 0 # Record counter
     discard = 0 # Discarded records counter
