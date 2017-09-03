@@ -1,13 +1,14 @@
 #! /usr/bin/env python
 
 import sys
-from ProDuSe.__version import __version__
+
 
 def usage():
     """
     Prints ProDuSe's usage information to stdout
     """
 
+    from ProDuSe.__version import __version__
     sys.stdout.write("\nProDuSe: Variant Caller for semi-degenerate barcoded adapter libraries\n")
     sys.stdout.write("Version: " + __version__ + "\n")
     sys.stdout.write("\n")
@@ -23,6 +24,7 @@ def usage():
     sys.stdout.write("\n")
     exit(1)
 
+
 def main(args):
 
     # Print out a usage message
@@ -32,11 +34,14 @@ def main(args):
 
     command = args[1]
 
+    # Supress the GUI, if one exists
+    if len(args) == 2:
+        args.append("-h")
+
     if command == "adapter_predict":
         from ProDuSe import adapter_predict
         adapter_predict.main(argv=args[2:])
         return
-
 
     from ProDuSe import ConfigMap, ArgMap, loadConfig, trim, collapse, ProDuSe
 
@@ -59,7 +64,7 @@ def main(args):
         usage()
         return
 
-    cfgs = loadConfig(args, functions, batchExpression='samples')
+    cfgs = loadConfig(args[1:], functions, batchExpression='samples')
     global config
     while True:
         try:
@@ -70,6 +75,7 @@ def main(args):
             continue
         except StopIteration:
             break
+
 
 if __name__ == "__main__":
     main(sys.argv)
