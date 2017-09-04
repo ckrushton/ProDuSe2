@@ -9,7 +9,7 @@ import errno
 
 # If called directly as a script
 try:
-    import FastqRecord
+    from FastqRecord import FastqRecord
 # If installed
 except ImportError:
     from ProDuSe import FastqRecord
@@ -96,10 +96,11 @@ def trim(barcode_distance: int, barcode_sequence: str, reverse: bool = False, in
     printPrefix = "PRODUSE-TRIM"
     if verbose:
         logStream.write("\t".join([printPrefix, time.strftime('%X'), "Starting...\n"]))
-    record1 = FastqRecord.FastqRecord()
+    record1 = FastqRecord()
+
     mated = mateStream is not None
     if mated:
-        record2 = FastqRecord.FastqRecord()
+        record2 = FastqRecord()
     invert = False
     count = 0  # Record counter
     discard = 0  # Discarded records counter

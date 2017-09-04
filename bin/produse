@@ -43,18 +43,18 @@ def main(args):
         adapter_predict.main(argv=args[2:])
         return
 
-    from ProDuSe import ConfigMap, ArgMap, loadConfig, trim, collapse, ProDuSe
+    from configutator import ConfigMap, ArgMap, loadConfig
 
-    ConfigMap(_func='trim', verbose=None, logStream=None)(trim)
-    ConfigMap(_func='collapse', verbose=None, logStream=None)(collapse)
-    ArgMap(_func=trim.__name__, verbose='verbose', logStream=None)(trim)
-    ArgMap(_func=collapse.__name__, verbose='verbose', logStream=None)(collapse)
-
-    if command == "run":
+    if command == "run_produse":
+        from ProDuSe.trim import trim
+        from ProDuSe.collapse import collapse
+        from ProDuSe import ProDuSe
         functions = (ProDuSe, trim, collapse)
     elif command == "trim":
+        from ProDuSe.trim import trim
         functions = (trim,)
     elif command == "collapse":
+        from ProDuSe.collapse import collapse
         functions = (collapse,)
     elif command == "call":
         sys.stdout.write("Not yet finished")
@@ -64,7 +64,19 @@ def main(args):
         usage()
         return
 
-    cfgs = loadConfig(args[1:], functions, batchExpression='samples')
+    try:
+        ConfigMap(_func=trim.__name__, verbose=None, logStream=None)(trim)
+        ArgMap(_func=trim.__name__, verbose='verbose', logStream=None)(trim)
+    except:
+        pass
+
+    try:
+        ConfigMap(_func=collapse.__name__, verbose=None, logStream=None)(collapse)
+        ArgMap(_func=collapse.__name__, verbose='verbose', logStream=None)(collapse)
+    except:
+        pass
+
+    cfgs = loadConfig(args, functions, batchExpression='samples')
     global config
     while True:
         try:
